@@ -116,7 +116,7 @@ fn main() {
 
     let (tx, rx) = crossbeam_channel::bounded(100);
     let options = SkimOptionsBuilder::default()
-        .height(Some("50%"))
+        .height(Some("100%"))
         .multi(false)
         .final_build()
         .unwrap();
