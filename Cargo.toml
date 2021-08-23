@@ -9,6 +9,7 @@ edition = "2018"
 crossbeam-channel = "0.5.1"
 skim = "0.9.4"
 structopt = "0.3.22"
+toml = "0.5.8"
 
 [[bin]]
 name = "project"
