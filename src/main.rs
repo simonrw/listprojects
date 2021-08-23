@@ -1,7 +1,9 @@
+use eyre::Result;
 use skim::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use structopt::StructOpt;
+use tmux_interface::TmuxCommand;
 
 #[derive(StructOpt, Debug)]
 struct Opts {}
@@ -41,8 +43,58 @@ fn walk_directory(
     drop(results);
 }
 
+struct Session<'a> {
+    selectable: &'a Selectable,
+    client: TmuxCommand<'a>,
+}
+
+impl<'a> Session<'a> {
+    fn new(selectable: &'a Selectable) -> Self {
+        Self {
+            selectable,
+            client: TmuxCommand::new(),
+        }
+    }
+
+    fn exists(&self) -> Result<bool> {
+        let output = self
+            .client
+            .has_session()
+            .target_session(&self.selectable.short_name)
+            .output()?;
+        let status_code = output.code().unwrap_or(1);
+        Ok(status_code == 0)
+    }
+
+    fn switch_client(&self) -> Result<()> {
+        self.client
+            .switch_client()
+            .target_session(&self.selectable.short_name)
+            .output()?;
+
+        Ok(())
+    }
+
+    fn create_session(&self) -> Result<()> {
+        self.client
+            .new_session()
+            .detached()
+            .start_directory(self.selectable.path.to_str().unwrap())
+            .session_name(&self.selectable.short_name)
+            .output()?;
+        self.switch_client()?;
+        Ok(())
+    }
+
+    fn tmux_running(&self) -> bool {
+        std::env::var("TMUX").map(|_| true).unwrap_or(false)
+    }
+}
+
 fn main() {
     tracing_subscriber::fmt::init();
+    color_eyre::install().unwrap();
+
     let args = Opts::from_args();
 
     tracing::info!(?args, "starting");
@@ -76,7 +128,18 @@ fn main() {
     if results.selected_items.is_empty() {
         return;
     }
-
     let item = Arc::clone(&results.selected_items[0]);
     let chosen: &Selectable = (*item).as_any().downcast_ref::<Selectable>().unwrap();
+
+    let tmux_session = Session::new(chosen);
+
+    if tmux_session.tmux_running() {
+        if tmux_session.exists().unwrap_or(false) {
+            tmux_session.switch_client().unwrap();
+        } else {
+            tmux_session.create_session().unwrap();
+        }
+    } else {
+        todo!()
+    }
 }
