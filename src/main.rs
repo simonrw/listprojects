@@ -171,7 +171,7 @@ fn main() -> Result<()> {
             tmux_session.create_session().unwrap();
         }
     } else {
-        todo!()
+        tmux_session.create_session().unwrap();
     }
 
     Ok(())
