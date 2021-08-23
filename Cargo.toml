@@ -7,3 +7,8 @@ edition = "2018"
 
 [dependencies]
 skim = "0.9.4"
+structopt = "0.3.22"
+
+[[bin]]
+name = "project"
+path = "src/main.rs"
