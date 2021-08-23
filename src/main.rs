@@ -155,6 +155,13 @@ fn main() -> Result<()> {
 
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
+        .color(Some("dark,matched_bg:-1"))
+        .no_mouse(true)
+        .preview(Some(""))
+        .preview_window(Some("up:30%"))
+        .inline_info(true)
+        .tabstop(Some("4"))
+        .tiebreak(Some("begin".to_string()))
         .multi(false)
         .final_build()
         .unwrap();
