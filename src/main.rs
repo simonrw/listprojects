@@ -1,4 +1,5 @@
-use eyre::Result;
+use eyre::{Result, WrapErr};
+use serde::Deserialize;
 use skim::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -6,7 +7,15 @@ use structopt::StructOpt;
 use tmux_interface::TmuxCommand;
 
 #[derive(StructOpt, Debug)]
-struct Opts {}
+struct Opts {
+    #[structopt(short, long, parse(from_os_str))]
+    config_file: Option<PathBuf>,
+}
+
+#[derive(Deserialize, Debug)]
+struct Config {
+    root_dirs: Vec<PathBuf>,
+}
 
 fn compute_short_name(p: impl AsRef<Path>) -> String {
     // XXX: So many clones
@@ -91,7 +100,17 @@ impl<'a> Session<'a> {
     }
 }
 
-fn main() {
+fn replace_home_path(p: &PathBuf) -> PathBuf {
+    if p.starts_with("~") {
+        dirs::home_dir()
+            .unwrap()
+            .join(p.strip_prefix("~/").unwrap())
+    } else {
+        p.clone()
+    }
+}
+
+fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install().unwrap();
 
@@ -99,10 +118,17 @@ fn main() {
 
     tracing::info!(?args, "starting");
 
-    let dirs: Vec<_> = ["dev"]
-        .iter()
-        .map(|stem| PathBuf::from("/home/simon").join(stem))
-        .collect();
+    let config_file_location = args.config_file.unwrap_or(
+        dirs::preference_dir()
+            .unwrap()
+            .join("project")
+            .join("config.toml"),
+    );
+    let config_text =
+        std::fs::read_to_string(config_file_location).wrap_err("reading config file")?;
+    let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
+
+    let dirs: Vec<_> = config.root_dirs.iter().map(replace_home_path).collect();
 
     tracing::debug!(?dirs, "using directories");
 
@@ -126,7 +152,7 @@ fn main() {
     handle.join().unwrap();
 
     if results.selected_items.is_empty() {
-        return;
+        return Ok(());
     }
     let item = Arc::clone(&results.selected_items[0]);
     let chosen: &Selectable = (*item).as_any().downcast_ref::<Selectable>().unwrap();
@@ -142,4 +168,6 @@ fn main() {
     } else {
         todo!()
     }
+
+    Ok(())
 }

@@ -8,8 +8,10 @@ edition = "2018"
 [dependencies]
 color-eyre = "0.5.11"
 crossbeam-channel = "0.5.1"
+dirs = "3.0.2"
 eyre = "0.6.5"
 ignore = "0.4.18"
+serde = { version = "1.0.128", features = ["derive"] }
 skim = "0.9.4"
 structopt = "0.3.22"
 tmux_interface = "0.2.1"
