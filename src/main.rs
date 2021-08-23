@@ -41,6 +41,10 @@ impl SkimItem for Selectable {
     fn text(&self) -> std::borrow::Cow<str> {
         std::borrow::Cow::Borrowed(self.short_name.as_str())
     }
+
+    fn preview(&self, _context: PreviewContext<'_>) -> ItemPreview {
+        ItemPreview::Command(format!("ls -l {}", self.path.to_str().unwrap()))
+    }
 }
 
 #[tracing::instrument(level = "trace", skip(walker, results))]
@@ -155,6 +159,13 @@ fn main() -> Result<()> {
 
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
+        .color(Some("dark,matched_bg:-1"))
+        .no_mouse(true)
+        .preview(Some(""))
+        .preview_window(Some("up:30%"))
+        .inline_info(true)
+        .tabstop(Some("4"))
+        .tiebreak(Some("begin".to_string()))
         .multi(false)
         .final_build()
         .unwrap();
