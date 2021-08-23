@@ -119,13 +119,13 @@ fn main() -> Result<()> {
     tracing::info!(?args, "starting");
 
     let config_file_location = args.config_file.unwrap_or(
-        dirs::preference_dir()
+        dirs::config_dir()
             .unwrap()
             .join("project")
             .join("config.toml"),
     );
-    let config_text =
-        std::fs::read_to_string(config_file_location).wrap_err("reading config file")?;
+    let config_text = std::fs::read_to_string(&config_file_location)
+        .wrap_err_with(|| format!("reading config file {:?}", &config_file_location))?;
     let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
 
     let dirs: Vec<_> = config.root_dirs.iter().map(replace_home_path).collect();
