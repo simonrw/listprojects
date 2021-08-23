@@ -13,8 +13,14 @@ struct Opts {
 }
 
 #[derive(Deserialize, Debug)]
+struct RootDir {
+    path: PathBuf,
+    depth: usize,
+}
+
+#[derive(Deserialize, Debug)]
 struct Config {
-    root_dirs: Vec<PathBuf>,
+    root_dirs: Vec<RootDir>,
 }
 
 fn compute_short_name(p: impl AsRef<Path>) -> String {
@@ -37,6 +43,7 @@ impl SkimItem for Selectable {
     }
 }
 
+#[tracing::instrument(level = "trace", skip(walker, results))]
 fn walk_directory(
     walker: ignore::Walk,
     results: crossbeam_channel::Sender<Arc<dyn SkimItem + 'static>>,
@@ -44,11 +51,15 @@ fn walk_directory(
     for every in walker {
         let every = every.unwrap();
         let path = every.path().to_owned();
+        tracing::trace!("found {:?}", path);
         let short_name = compute_short_name(&path);
-        let e: Arc<dyn SkimItem + 'static> = Arc::new(Selectable { short_name, path });
+        let selectable = Selectable { short_name, path };
+        tracing::trace!(?selectable, "created selectable");
+        let e: Arc<dyn SkimItem + 'static> = Arc::new(selectable);
         results.send(e).unwrap();
     }
 
+    tracing::trace!("dropping result channel");
     drop(results);
 }
 
@@ -127,30 +138,32 @@ fn main() -> Result<()> {
     let config_text = std::fs::read_to_string(&config_file_location)
         .wrap_err_with(|| format!("reading config file {:?}", &config_file_location))?;
     let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
-
-    let dirs: Vec<_> = config.root_dirs.iter().map(replace_home_path).collect();
-
-    tracing::debug!(?dirs, "using directories");
-
-    let mut builder = ignore::WalkBuilder::new(&dirs[0]);
-    builder.max_depth(Some(1));
-    builder.filter_entry(|e| e.path().is_dir());
-    for dir in dirs.iter().skip(1) {
-        builder.add(dir);
-    }
-    let walker = builder.build();
-
     let (tx, rx) = crossbeam_channel::bounded(100);
+
+    let mut handles: Vec<std::thread::JoinHandle<()>> = Vec::new();
+    for root_dir in config.root_dirs {
+        tracing::debug!(?root_dir, "using root directory");
+        let mut builder = ignore::WalkBuilder::new(replace_home_path(&root_dir.path));
+        builder.max_depth(Some(root_dir.depth));
+        builder.filter_entry(|e| e.path().is_dir());
+        let walker = builder.build();
+
+        let tx = tx.clone();
+        let handle = std::thread::spawn(move || walk_directory(walker, tx));
+        handles.push(handle);
+    }
+
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
         .multi(false)
-        .exit0(true)
         .final_build()
         .unwrap();
 
-    let handle = std::thread::spawn(move || walk_directory(walker, tx));
+    tracing::info!("showing skim window");
+
     let results = Skim::run_with(&options, Some(rx)).unwrap();
-    handle.join().unwrap();
+
+    tracing::info!("joining worker threads");
 
     if results.is_abort {
         return Ok(());
@@ -172,6 +185,10 @@ fn main() -> Result<()> {
         }
     } else {
         tmux_session.create_session().unwrap();
+    }
+
+    for handle in handles {
+        handle.join().unwrap();
     }
 
     Ok(())

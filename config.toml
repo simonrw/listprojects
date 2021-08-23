@@ -1,1 +1,7 @@
-root_dirs = ["~/dev"]
+[[root_dirs]]
+path = "~/dev"
+depth = 1
+
+[[root_dirs]]
+path = "~/work"
+depth = 2
