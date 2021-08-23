@@ -144,12 +144,17 @@ fn main() -> Result<()> {
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
         .multi(false)
+        .exit0(true)
         .final_build()
         .unwrap();
 
     let handle = std::thread::spawn(move || walk_directory(walker, tx));
     let results = Skim::run_with(&options, Some(rx)).unwrap();
     handle.join().unwrap();
+
+    if results.is_abort {
+        return Ok(());
+    }
 
     if results.selected_items.is_empty() {
         return Ok(());
