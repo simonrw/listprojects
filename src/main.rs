@@ -53,7 +53,7 @@ fn walk_directory(
         let path = every.path().to_owned();
         tracing::trace!("found {:?}", path);
         let short_name = compute_short_name(&path);
-        let selectable = Selectable { short_name, path };
+        let selectable = Selectable { path, short_name };
         tracing::trace!(?selectable, "created selectable");
         let e: Arc<dyn SkimItem + 'static> = Arc::new(selectable);
         results.send(e).unwrap();
@@ -111,17 +111,19 @@ impl<'a> Session<'a> {
     }
 }
 
-fn replace_home_path(p: &PathBuf) -> PathBuf {
+fn replace_home_path(p: &Path) -> PathBuf {
     if p.starts_with("~") {
         dirs::home_dir()
             .unwrap()
             .join(p.strip_prefix("~/").unwrap())
     } else {
-        p.clone()
+        p.to_path_buf()
     }
 }
 
+#[tracing::instrument]
 fn create_builder(root: &RootDir) -> ignore::Walk {
+    tracing::debug!(?root, "creating builder");
     let mut builder = ignore::WalkBuilder::new(replace_home_path(&root.path));
     builder.max_depth(Some(root.depth));
     builder.filter_entry(|e| e.path().is_dir());
@@ -136,12 +138,12 @@ fn main() -> Result<()> {
 
     tracing::info!(?args, "starting");
 
-    let config_file_location = args.config_file.unwrap_or(
+    let config_file_location = args.config_file.unwrap_or_else(|| {
         dirs::config_dir()
             .unwrap()
             .join("project")
-            .join("config.toml"),
-    );
+            .join("config.toml")
+    });
     let config_text = std::fs::read_to_string(&config_file_location)
         .wrap_err_with(|| format!("reading config file {:?}", &config_file_location))?;
     let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
