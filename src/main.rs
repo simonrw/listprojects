@@ -121,6 +121,13 @@ fn replace_home_path(p: &PathBuf) -> PathBuf {
     }
 }
 
+fn create_builder(root: &RootDir) -> ignore::Walk {
+    let mut builder = ignore::WalkBuilder::new(replace_home_path(&root.path));
+    builder.max_depth(Some(root.depth));
+    builder.filter_entry(|e| e.path().is_dir());
+    builder.build()
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     color_eyre::install().unwrap();
@@ -140,18 +147,18 @@ fn main() -> Result<()> {
     let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
     let (tx, rx) = crossbeam_channel::bounded(100);
 
-    let mut handles: Vec<std::thread::JoinHandle<()>> = Vec::new();
-    for root_dir in config.root_dirs {
-        tracing::debug!(?root_dir, "using root directory");
-        let mut builder = ignore::WalkBuilder::new(replace_home_path(&root_dir.path));
-        builder.max_depth(Some(root_dir.depth));
-        builder.filter_entry(|e| e.path().is_dir());
-        let walker = builder.build();
+    let handles: Vec<std::thread::JoinHandle<()>> = config
+        .root_dirs
+        .iter()
+        .map(|root| {
+            tracing::debug!(?root, "using root directory");
+            let tx = tx.clone();
 
-        let tx = tx.clone();
-        let handle = std::thread::spawn(move || walk_directory(walker, tx));
-        handles.push(handle);
-    }
+            let walker = create_builder(root);
+
+            std::thread::spawn(move || walk_directory(walker, tx))
+        })
+        .collect();
 
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
