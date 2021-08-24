@@ -175,11 +175,11 @@ fn main() -> Result<()> {
         .final_build()
         .unwrap();
 
-    tracing::info!("showing skim window");
+    tracing::debug!("showing skim window");
 
     let results = Skim::run_with(&options, Some(rx)).unwrap();
 
-    tracing::info!("joining worker threads");
+    tracing::debug!("joining worker threads");
 
     if results.is_abort {
         return Ok(());
