@@ -102,7 +102,14 @@ impl<'a> Session<'a> {
             .start_directory(self.selectable.path.to_str().unwrap())
             .session_name(&self.selectable.short_name)
             .output()?;
-        self.switch_client()?;
+        Ok(())
+    }
+
+    fn join_session(&self) -> Result<()> {
+        self.client
+            .attach_session()
+            .target_session(&self.selectable.short_name)
+            .output()?;
         Ok(())
     }
 
@@ -198,9 +205,11 @@ fn main() -> Result<()> {
             tmux_session.switch_client().unwrap();
         } else {
             tmux_session.create_session().unwrap();
+            tmux_session.switch_client().unwrap();
         }
     } else {
         tmux_session.create_session().unwrap();
+        tmux_session.join_session().unwrap();
     }
 
     for handle in handles {
