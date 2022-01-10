@@ -43,6 +43,10 @@ impl SkimItem for Selectable {
     }
 }
 
+fn is_git_dir(path: &Path) -> bool {
+    path.join(".git").is_dir()
+}
+
 #[tracing::instrument(level = "trace", skip(walker, results))]
 fn walk_directory(
     walker: ignore::Walk,
@@ -51,6 +55,12 @@ fn walk_directory(
     for every in walker {
         let every = every.unwrap();
         let path = every.path().to_owned();
+
+        if !is_git_dir(&path) {
+            tracing::trace!(?path, "not git dir");
+            continue;
+        }
+
         tracing::trace!("found {:?}", path);
         let short_name = compute_short_name(&path);
         let selectable = Selectable { path, short_name };
