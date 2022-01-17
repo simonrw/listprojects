@@ -23,12 +23,24 @@ struct Config {
     root_dirs: Vec<RootDir>,
 }
 
-fn compute_short_name(p: impl AsRef<Path>) -> String {
-    // XXX: So many clones
+impl Config {
+    fn normalise_paths(&mut self) -> Result<()> {
+        for root_dir in self.root_dirs.iter_mut() {
+            if root_dir.path.starts_with("~") {
+                root_dir.path = dirs::home_dir()
+                    .unwrap()
+                    .join(root_dir.path.strip_prefix("~").unwrap().to_path_buf());
+            }
+            root_dir.path = root_dir.path.canonicalize()?;
+        }
+
+        Ok(())
+    }
+}
+
+fn compute_short_name(root: &RootDir, p: impl AsRef<Path>) -> String {
     let p = p.as_ref();
-    let parts: PathBuf = p.components().rev().take(2).collect();
-    let result: PathBuf = parts.components().rev().collect();
-    result.to_str().unwrap().to_owned()
+    p.strip_prefix(&root.path).unwrap().display().to_string()
 }
 
 #[derive(Debug)]
@@ -50,6 +62,7 @@ fn is_git_dir(path: &Path) -> bool {
 #[tracing::instrument(level = "trace", skip(walker, results))]
 fn walk_directory(
     walker: ignore::Walk,
+    root: &RootDir,
     results: crossbeam_channel::Sender<Arc<dyn SkimItem + 'static>>,
 ) {
     for every in walker {
@@ -61,12 +74,16 @@ fn walk_directory(
             continue;
         }
 
-        tracing::trace!("found {:?}", path);
-        let short_name = compute_short_name(&path);
-        let selectable = Selectable { path, short_name };
+        let short_name = compute_short_name(root, &path);
+        let selectable = Selectable {
+            path,
+            short_name,
+        };
         tracing::trace!(?selectable, "created selectable");
         let e: Arc<dyn SkimItem + 'static> = Arc::new(selectable);
-        results.send(e).unwrap();
+        // XXX we don't care if the receiver goes away - that likely means that the user has made
+        // their selection.
+        let _ = results.send(e).unwrap();
     }
 
     tracing::trace!("dropping result channel");
@@ -142,7 +159,6 @@ fn replace_home_path(p: &Path) -> PathBuf {
 fn create_builder(root: &RootDir) -> ignore::Walk {
     tracing::debug!(?root, "creating builder");
     let mut builder = ignore::WalkBuilder::new(replace_home_path(&root.path));
-    builder.max_depth(Some(root.depth));
     builder.filter_entry(|e| e.path().is_dir());
     builder.build()
 }
@@ -163,10 +179,11 @@ fn main() -> Result<()> {
     });
     let config_text = std::fs::read_to_string(&config_file_location)
         .wrap_err_with(|| format!("reading config file {:?}", &config_file_location))?;
-    let config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
+    let mut config: Config = toml::from_str(&config_text).wrap_err("parsing config file")?;
+    config.normalise_paths()?;
     let (tx, rx) = crossbeam_channel::bounded(100);
 
-    let handles: Vec<std::thread::JoinHandle<()>> = config
+    let _handles: Vec<std::thread::JoinHandle<()>> = config
         .root_dirs
         .iter()
         .map(|root| {
@@ -175,7 +192,8 @@ fn main() -> Result<()> {
 
             let walker = create_builder(root);
 
-            std::thread::spawn(move || walk_directory(walker, tx))
+            let root = root.clone();
+            std::thread::spawn(move || walk_directory(walker, &root, tx))
         })
         .collect();
 
@@ -222,9 +240,7 @@ fn main() -> Result<()> {
         tmux_session.join_session().unwrap();
     }
 
-    for handle in handles {
-        handle.join().unwrap();
-    }
+    // XXX do not wait for the threads to finish - just exit
 
     Ok(())
 }
