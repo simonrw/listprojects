@@ -1,5 +1,6 @@
 [[root_dirs]]
-path = "~/dev"
+path = "~/work"
 
 [[root_dirs]]
-path = "~/work"
+path = "~/src"
+prefix = "foobar/"

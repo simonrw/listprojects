@@ -12,10 +12,10 @@ struct Opts {
     config_file: Option<PathBuf>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 struct RootDir {
     path: PathBuf,
-    depth: usize,
+    prefix: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -47,11 +47,22 @@ fn compute_short_name(root: &RootDir, p: impl AsRef<Path>) -> String {
 struct Selectable {
     path: PathBuf,
     short_name: String,
+    prefix: Option<String>,
 }
 
 impl SkimItem for Selectable {
     fn text(&self) -> std::borrow::Cow<str> {
         std::borrow::Cow::Borrowed(self.short_name.as_str())
+    }
+}
+
+impl Selectable {
+    fn session_name(&self) -> String {
+        if let Some(prefix) = &self.prefix {
+            format!("{}{}", prefix, self.short_name)
+        } else {
+            self.short_name.clone()
+        }
     }
 }
 
@@ -78,6 +89,7 @@ fn walk_directory(
         let selectable = Selectable {
             path,
             short_name,
+            prefix: root.prefix.clone(),
         };
         tracing::trace!(?selectable, "created selectable");
         let e: Arc<dyn SkimItem + 'static> = Arc::new(selectable);
@@ -107,7 +119,7 @@ impl<'a> Session<'a> {
         let output = self
             .client
             .has_session()
-            .target_session(&self.selectable.short_name)
+            .target_session(self.selectable.session_name())
             .output()?;
         let status_code = output.code().unwrap_or(1);
         Ok(status_code == 0)
@@ -116,7 +128,7 @@ impl<'a> Session<'a> {
     fn switch_client(&self) -> Result<()> {
         self.client
             .switch_client()
-            .target_session(&self.selectable.short_name)
+            .target_session(self.selectable.session_name())
             .output()?;
 
         Ok(())
@@ -127,7 +139,7 @@ impl<'a> Session<'a> {
             .new_session()
             .detached()
             .start_directory(self.selectable.path.to_str().unwrap())
-            .session_name(&self.selectable.short_name)
+            .session_name(self.selectable.session_name())
             .output()?;
         Ok(())
     }
@@ -135,7 +147,7 @@ impl<'a> Session<'a> {
     fn join_session(&self) -> Result<()> {
         self.client
             .attach_session()
-            .target_session(&self.selectable.short_name)
+            .target_session(self.selectable.session_name())
             .output()?;
         Ok(())
     }
