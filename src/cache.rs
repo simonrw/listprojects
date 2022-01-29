@@ -17,9 +17,10 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use crate::Selectable;
 
-    use super::Cache;
     use std::{
         io::{prelude::*, SeekFrom},
         path::PathBuf,
@@ -27,30 +28,59 @@ mod tests {
 
     #[test]
     fn load_empty() {
-        let mut file = tempfile::tempfile().unwrap();
-        write!(&mut file, "[]").unwrap();
-        file.seek(SeekFrom::Start(0)).unwrap();
+        temp_file_with_contents("[]", |file| {
+            let cache = Cache::from_reader(file).unwrap();
 
-        let cache = Cache::from_reader(file).unwrap();
-
-        assert_eq!(cache, Cache(Vec::new()));
+            assert_eq!(cache, Cache(Vec::new()));
+            Ok(())
+        });
     }
 
     #[test]
     fn load_blank() {
-        let mut file = tempfile::tempfile().unwrap();
-        write!(&mut file, r#"[{{"path": "", "short_name": ""}}]"#).unwrap();
-        file.seek(SeekFrom::Start(0)).unwrap();
+        temp_file_with_contents(r#"[{"path": "", "short_name": ""}]"#, |file| {
+            let cache = Cache::from_reader(file).unwrap();
 
-        let cache = Cache::from_reader(file).unwrap();
+            assert_eq!(
+                cache,
+                Cache(vec![Selectable {
+                    path: PathBuf::from(""),
+                    short_name: "".to_string(),
+                    prefix: None,
+                }])
+            );
+            Ok(())
+        });
+    }
 
-        assert_eq!(
-            cache,
-            Cache(vec![Selectable {
-                path: PathBuf::from(""),
-                short_name: "".to_string(),
-                prefix: None,
-            }])
+    #[test]
+    fn load_with_values() {
+        temp_file_with_contents(
+            r#"[{"path": "/a/b/c", "short_name": "something", "prefix": "a/"}]"#,
+            |file| {
+                let cache = Cache::from_reader(file).unwrap();
+
+                assert_eq!(
+                    cache,
+                    Cache(vec![Selectable {
+                        path: PathBuf::from("/a/b/c"),
+                        short_name: "something".to_string(),
+                        prefix: Some("a/".to_string()),
+                    }])
+                );
+                Ok(())
+            },
         );
+    }
+
+    // helper functions
+    fn temp_file_with_contents<F>(contents: &str, cb: F)
+    where
+        F: Fn(&mut std::fs::File) -> Result<()>,
+    {
+        let mut file = tempfile::tempfile().unwrap();
+        write!(&mut file, "{}", contents).unwrap();
+        file.seek(SeekFrom::Start(0)).unwrap();
+        cb(&mut file).unwrap()
     }
 }
