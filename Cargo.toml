@@ -12,6 +12,7 @@ dirs = "3.0.2"
 eyre = "0.6.5"
 ignore = "0.4.18"
 serde = { version = "1.0.128", features = ["derive"] }
+serde_json = "1.0.78"
 skim = "0.9.4"
 structopt = "0.3.22"
 tmux_interface = "0.2.1"
@@ -22,3 +23,6 @@ tracing-subscriber = { version = "0.2.20", features = ["fmt", "env-filter"] }
 [[bin]]
 name = "project"
 path = "src/main.rs"
+
+[dev-dependencies]
+tempfile = "3.3.0"

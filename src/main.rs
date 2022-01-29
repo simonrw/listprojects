@@ -1,10 +1,14 @@
 use eyre::{Result, WrapErr};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use skim::prelude::*;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use structopt::StructOpt;
 use tmux_interface::TmuxCommand;
+
+mod cache;
+
+use crate::cache::Cache;
 
 #[derive(StructOpt, Debug)]
 struct Opts {
@@ -43,7 +47,7 @@ fn compute_short_name(root: &RootDir, p: impl AsRef<Path>) -> String {
     p.strip_prefix(&root.path).unwrap().display().to_string()
 }
 
-#[derive(Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
 struct Selectable {
     path: PathBuf,
     short_name: String,
