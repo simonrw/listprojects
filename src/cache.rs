@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error, io::Read, io::Write, path::Path};
+use std::{collections::HashSet, io::Read, io::Write, path::Path};
 
 use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ impl Cache {
         let p = p.as_ref();
         let cache = std::fs::File::open(p)
             .map_err(From::from)
-            .and_then(|f| Self::from_reader(f))
+            .and_then(Self::from_reader)
             .unwrap_or_default();
         Ok(cache)
     }
