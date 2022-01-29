@@ -1,17 +1,30 @@
-use std::io::Read;
+use std::{io::Read, path::Path};
 
 use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
 
 use crate::Selectable;
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
 pub(crate) struct Cache(Vec<Selectable>);
 
 impl Cache {
     fn from_reader(r: impl Read) -> Result<Self> {
         let cache = serde_json::from_reader(r).wrap_err("reading cache")?;
         Ok(cache)
+    }
+
+    fn open(p: impl AsRef<Path>) -> Result<Self> {
+        let p = p.as_ref();
+        let cache = std::fs::File::open(p)
+            .map_err(From::from)
+            .and_then(|f| Self::from_reader(f))
+            .unwrap_or_default();
+        Ok(cache)
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -71,6 +84,16 @@ mod tests {
                 Ok(())
             },
         );
+    }
+
+    #[test]
+    fn load_with_no_cache_present() {
+        let tdir = tempfile::tempdir().unwrap();
+        let filename = tdir.path().join("config.json");
+
+        let cache = Cache::open(&filename).unwrap();
+
+        assert!(cache.is_empty());
     }
 
     // helper functions
