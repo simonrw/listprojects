@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::Read, path::Path};
+use std::{collections::HashSet, io::Read, io::Write, path::Path};
 
 use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -25,6 +25,11 @@ impl Cache {
 
     fn is_empty(&self) -> bool {
         self.0.is_empty()
+    }
+
+    fn write_to(&self, w: impl Write) -> Result<()> {
+        serde_json::to_writer(w, self).wrap_err("saving cache")?;
+        Ok(())
     }
 }
 
@@ -90,6 +95,21 @@ mod tests {
         let cache = Cache::open(&filename).unwrap();
 
         assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn saving() {
+        let cache = Cache(HashSet::from_iter(vec![Selectable {
+            path: PathBuf::from("/a/b/c"),
+            short_name: "short-name".to_string(),
+            prefix: None,
+        }]));
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        cache.write_to(&mut f).unwrap();
+        f.seek(SeekFrom::Start(0)).unwrap();
+
+        let read_cache = Cache::from_reader(f).unwrap();
+        assert_eq!(read_cache, cache);
     }
 
     // helper functions
