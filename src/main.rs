@@ -47,7 +47,7 @@ fn compute_short_name(root: &RootDir, p: impl AsRef<Path>) -> String {
     p.strip_prefix(&root.path).unwrap().display().to_string()
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
 struct Selectable {
     path: PathBuf,
     short_name: String,

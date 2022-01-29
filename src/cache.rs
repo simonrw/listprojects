@@ -1,4 +1,4 @@
-use std::{io::Read, path::Path};
+use std::{collections::HashSet, io::Read, path::Path};
 
 use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::Selectable;
 
 #[derive(Serialize, Deserialize, Default, Debug, PartialEq, Eq)]
-pub(crate) struct Cache(Vec<Selectable>);
+pub(crate) struct Cache(HashSet<Selectable>);
 
 impl Cache {
     fn from_reader(r: impl Read) -> Result<Self> {
@@ -44,7 +44,7 @@ mod tests {
         temp_file_with_contents("[]", |file| {
             let cache = Cache::from_reader(file).unwrap();
 
-            assert_eq!(cache, Cache(Vec::new()));
+            assert_eq!(cache, Cache(HashSet::new()));
             Ok(())
         });
     }
@@ -54,14 +54,12 @@ mod tests {
         temp_file_with_contents(r#"[{"path": "", "short_name": ""}]"#, |file| {
             let cache = Cache::from_reader(file).unwrap();
 
-            assert_eq!(
-                cache,
-                Cache(vec![Selectable {
-                    path: PathBuf::from(""),
-                    short_name: "".to_string(),
-                    prefix: None,
-                }])
-            );
+            let expected = Cache(HashSet::from_iter(vec![Selectable {
+                path: PathBuf::from(""),
+                short_name: "".to_string(),
+                prefix: None,
+            }]));
+            assert_eq!(cache, expected);
             Ok(())
         });
     }
@@ -73,14 +71,12 @@ mod tests {
             |file| {
                 let cache = Cache::from_reader(file).unwrap();
 
-                assert_eq!(
-                    cache,
-                    Cache(vec![Selectable {
-                        path: PathBuf::from("/a/b/c"),
-                        short_name: "something".to_string(),
-                        prefix: Some("a/".to_string()),
-                    }])
-                );
+                let expected = Cache(HashSet::from_iter(vec![Selectable {
+                    path: PathBuf::from("/a/b/c"),
+                    short_name: "something".to_string(),
+                    prefix: Some("a/".to_string()),
+                }]));
+                assert_eq!(cache, expected);
                 Ok(())
             },
         );
