@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::Read, io::Write, path::Path};
+use std::{collections::HashSet, error::Error, io::Read, io::Write, path::Path};
 
 use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -9,12 +9,12 @@ use crate::Selectable;
 pub(crate) struct Cache(HashSet<Selectable>);
 
 impl Cache {
-    fn from_reader(r: impl Read) -> Result<Self> {
+    pub(crate) fn from_reader(r: impl Read) -> Result<Self> {
         let cache = serde_json::from_reader(r).wrap_err("reading cache")?;
         Ok(cache)
     }
 
-    fn open(p: impl AsRef<Path>) -> Result<Self> {
+    pub(crate) fn open(p: impl AsRef<Path>) -> Result<Self> {
         let p = p.as_ref();
         let cache = std::fs::File::open(p)
             .map_err(From::from)
@@ -23,12 +23,18 @@ impl Cache {
         Ok(cache)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
     fn write_to(&self, w: impl Write) -> Result<()> {
-        serde_json::to_writer(w, self).wrap_err("saving cache")?;
+        serde_json::to_writer(w, self).wrap_err("writing cache")?;
+        Ok(())
+    }
+
+    pub(crate) fn save(&self, filename: impl AsRef<Path>) -> Result<()> {
+        let mut f = std::fs::File::create(filename).wrap_err("creating output file")?;
+        self.write_to(&mut f).wrap_err("writing to output file")?;
         Ok(())
     }
 }
@@ -112,6 +118,27 @@ mod tests {
         assert_eq!(read_cache, cache);
     }
 
+    #[test]
+    fn overwriting() {
+        let cache = Cache(HashSet::from_iter(vec![Selectable {
+            path: PathBuf::from("/a/b/c"),
+            short_name: "short-name".to_string(),
+            prefix: None,
+        }]));
+        let tdir = tempfile::tempdir().unwrap();
+        let tpath = tdir.path().join("cache.json");
+        dbg!(&tpath);
+        let mut f = std::fs::File::create(&tpath).unwrap();
+        write!(&mut f, "contents").unwrap();
+        f.flush().unwrap();
+        drop(f);
+
+        cache.save(&tpath).unwrap();
+
+        let f2 = std::fs::File::open(&tpath).unwrap();
+        let read_cache = Cache::from_reader(f2).unwrap();
+        assert_eq!(read_cache, cache);
+    }
     // helper functions
     fn temp_file_with_contents<F>(contents: &str, cb: F)
     where
