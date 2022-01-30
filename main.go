@@ -10,6 +10,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"os/user"
 	"path"
 	"path/filepath"
 	"strings"
@@ -17,7 +18,49 @@ import (
 	"github.com/adrg/xdg"
 	"github.com/jessevdk/go-flags"
 	"github.com/ktr0731/go-fuzzyfinder"
+	"github.com/pelletier/go-toml/v2"
 )
+
+type Config struct {
+	RootDirs []RootDir `toml:"root_dirs"`
+}
+
+type RootDir struct {
+	Path   string `toml:"path"`
+	Prefix string `toml:"prefix" omitempty:"true"`
+}
+
+// expandUser replaces "~" characters with the users home directory
+func expandUser(p string) string {
+	if !strings.HasPrefix(p, "~") {
+		return p
+	}
+
+	usr, _ := user.Current()
+	dir := usr.HomeDir
+
+	return filepath.Join(dir, p[2:])
+
+}
+
+func OpenConfig() (*Config, error) {
+	p := path.Join(xdg.ConfigHome, "project", "config.toml")
+	b, err := ioutil.ReadFile(p)
+	if err != nil {
+		return nil, fmt.Errorf("opening config file: %w", err)
+	}
+	var c Config
+	if err = toml.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+	// expand out ~ characters
+	for i, r := range c.RootDirs {
+		r.Path = expandUser(r.Path)
+		c.RootDirs[i] = r
+	}
+
+	return &c, nil
+}
 
 // helper functions
 func fileExists(path string) bool {
@@ -75,7 +118,9 @@ func New(clear bool) (*Cache, error) {
 	cachePath := path.Join(cacheDir, "config.json")
 
 	if !fileExists(cachePath) {
-		return &Cache{loc: cachePath}, nil
+		c := Cache{loc: cachePath}
+		c.Paths = make(map[Path]bool)
+		return &c, nil
 	}
 
 	cacheData, err := ioutil.ReadFile(cachePath)
@@ -182,6 +227,11 @@ func main() {
 		log.Fatal(err)
 	}
 
+	cfg, err := OpenConfig()
+	if err != nil {
+		log.Fatalf("could not open config file: %v", err)
+	}
+
 	cache, err := New(opts.Clear)
 	if err != nil {
 		log.Fatal(err)
@@ -190,23 +240,25 @@ func main() {
 
 	paths := cache.InitialPaths()
 
-	go func() {
-		if err := filepath.WalkDir("/home/simon/dev", func(p string, d fs.DirEntry, err error) error {
-			if dirExists(path.Join(p, ".git")) {
-				entry := Path{
-					FullPath: p,
+	for _, rootDir := range cfg.RootDirs {
+		go func(r RootDir) {
+			if err := filepath.WalkDir(r.Path, func(p string, d fs.DirEntry, err error) error {
+				if dirExists(path.Join(p, ".git")) {
+					entry := Path{
+						FullPath: p,
+					}
+					if !cache.Contains(entry) {
+						paths = append(paths, entry)
+						cache.Add(entry)
+					}
+					return filepath.SkipDir
 				}
-				if !cache.Contains(entry) {
-					paths = append(paths, entry)
-					cache.Add(entry)
-				}
-				return filepath.SkipDir
+				return nil
+			}); err != nil {
+				panic(err)
 			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-	}()
+		}(rootDir)
+	}
 
 	idx, err := fuzzyfinder.Find(
 		&paths,
