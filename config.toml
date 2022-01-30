@@ -1,6 +1,0 @@
-[[root_dirs]]
-path = "~/work"
-
-[[root_dirs]]
-path = "~/src"
-prefix = "foobar/"
