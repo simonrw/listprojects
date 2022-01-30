@@ -279,7 +279,9 @@ func main() {
 	)
 
 	if err != nil {
-		log.Fatal(err)
+		if !errors.Is(err, fuzzyfinder.ErrAbort) {
+			log.Fatal(err)
+		}
 	}
 	// set up the tmux session
 	selectedPath := paths[idx]
