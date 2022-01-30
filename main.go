@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/adrg/xdg"
+	"github.com/jessevdk/go-flags"
 	"github.com/ktr0731/go-fuzzyfinder"
 )
 
@@ -65,7 +66,7 @@ func (s serializedCache) fromSerialized(path string) Cache {
 	return c
 }
 
-func New() (*Cache, error) {
+func New(clear bool) (*Cache, error) {
 	cacheDir := path.Join(xdg.CacheHome, "project")
 	os.MkdirAll(cacheDir, 0700)
 	cachePath := path.Join(cacheDir, "config.json")
@@ -84,6 +85,12 @@ func New() (*Cache, error) {
 		return nil, fmt.Errorf("could not read cache content: %w", err)
 	}
 	cache := s.fromSerialized(cachePath)
+
+	if clear {
+		cache.Paths = make(map[Path]bool)
+	}
+	cache.Write()
+
 	return &cache, nil
 }
 
@@ -115,7 +122,17 @@ func (c Cache) Contains(entry Path) bool {
 }
 
 func main() {
-	cache, err := New()
+
+	var opts struct {
+		Clear bool `short:"c" long:"clear" description:"clear cache"`
+	}
+
+	_, err := flags.Parse(&opts)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	cache, err := New(opts.Clear)
 	if err != nil {
 		log.Fatal(err)
 	}
