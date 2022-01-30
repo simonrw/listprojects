@@ -16,6 +16,7 @@ import (
 
 	"github.com/adrg/xdg"
 	"github.com/jessevdk/go-flags"
+	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // helper functions
@@ -207,22 +208,21 @@ func main() {
 		}
 	}()
 
-	// 	idx, err := fuzzyfinder.Find(
-	// 		&paths,
-	// 		func(i int) string {
-	// 			return paths[i].FullPath
-	// 		},
-	// 		fuzzyfinder.WithHotReload(),
-	// 		fuzzyfinder.WithHeader("Choose project"),
-	// 	)
+	idx, err := fuzzyfinder.Find(
+		&paths,
+		func(i int) string {
+			return paths[i].FullPath
+		},
+		fuzzyfinder.WithHotReload(),
+		fuzzyfinder.WithHeader("Choose project"),
+	)
 
-	// 	if err != nil {
-	// 		log.Fatal(err)
-	// 	}
+	if err != nil {
+		log.Fatal(err)
+	}
 	// set up the tmux session
-	// selectedPath := paths[idx]
-	selectedPath := "/home/swalker/dev/lenstracker"
-	session := NewSession(selectedPath)
+	selectedPath := paths[idx]
+	session := NewSession(selectedPath.FullPath)
 	if session.TmuxRunning() {
 		if session.Exists() {
 			session.SwitchClient()
