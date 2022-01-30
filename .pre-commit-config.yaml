@@ -1,0 +1,14 @@
+---
+repos:
+  - repo: local
+    hooks:
+      - id: go test
+        name: go test
+        entry: go test
+        language: system
+        always_run: false
+        stages:
+          - commit
+        types:
+          - go
+fail_fast: true
