@@ -23,6 +23,18 @@ impl Cache {
         Ok(cache)
     }
 
+    pub(crate) fn open_default() -> Result<Self> {
+        let default_path = dirs::cache_dir()
+            .map(|d| d.join("project").join("cache.json"))
+            .ok_or_else(|| eyre::eyre!("could not find config dir"))?;
+        dbg!(&default_path);
+        Self::open(default_path)
+    }
+
+    pub(crate) fn add(&mut self, s: &Selectable) {
+        self.0.insert(s.clone());
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -139,6 +151,19 @@ mod tests {
         let read_cache = Cache::from_reader(f2).unwrap();
         assert_eq!(read_cache, cache);
     }
+
+    #[test]
+    fn adding_items() {
+        let mut cache = Cache::default();
+        assert!(cache.is_empty());
+        cache.add(&Selectable {
+            path: PathBuf::from("/a/b/c"),
+            short_name: "something".to_string(),
+            prefix: None,
+        });
+        assert!(!cache.is_empty());
+    }
+
     // helper functions
     fn temp_file_with_contents<F>(contents: &str, cb: F)
     where

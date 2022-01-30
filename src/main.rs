@@ -2,7 +2,7 @@ use eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use skim::prelude::*;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use structopt::StructOpt;
 use tmux_interface::TmuxCommand;
 
@@ -47,7 +47,7 @@ fn compute_short_name(root: &RootDir, p: impl AsRef<Path>) -> String {
     p.strip_prefix(&root.path).unwrap().display().to_string()
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Hash, Clone)]
 struct Selectable {
     path: PathBuf,
     short_name: String,
@@ -187,6 +187,10 @@ fn main() -> Result<()> {
 
     tracing::info!(?args, "starting");
 
+    let cache = Arc::new(Mutex::new(
+        Cache::open_default().wrap_err("opening default cache")?,
+    ));
+
     let config_file_location = args.config_file.unwrap_or_else(|| {
         dirs::config_dir()
             .unwrap()
@@ -199,6 +203,7 @@ fn main() -> Result<()> {
     config.normalise_paths()?;
     let (tx, rx) = crossbeam_channel::bounded(100);
 
+    // fill the cache
     let _handles: Vec<std::thread::JoinHandle<()>> = config
         .root_dirs
         .iter()
