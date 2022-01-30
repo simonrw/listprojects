@@ -279,7 +279,10 @@ func main() {
 	)
 
 	if err != nil {
-		if !errors.Is(err, fuzzyfinder.ErrAbort) {
+		if errors.Is(err, fuzzyfinder.ErrAbort) {
+			// exit with failed status code so that the tmux binding does not kill the current session
+			os.Exit(1)
+		} else {
 			log.Fatal(err)
 		}
 	}
