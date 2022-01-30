@@ -83,7 +83,8 @@ func dirExists(path string) bool {
 }
 
 type Path struct {
-	FullPath string
+	FullPath    string
+	SessionName string
 }
 
 type Cache struct {
@@ -216,6 +217,10 @@ func (s Session) sessionName() string {
 	return s.path
 }
 
+func sessionName(root RootDir, path string) string {
+	return root.Prefix + strings.TrimLeft(strings.TrimPrefix(path, root.Path), "/")
+}
+
 func main() {
 
 	var opts struct {
@@ -245,7 +250,8 @@ func main() {
 			if err := filepath.WalkDir(r.Path, func(p string, d fs.DirEntry, err error) error {
 				if dirExists(path.Join(p, ".git")) {
 					entry := Path{
-						FullPath: p,
+						FullPath:    p,
+						SessionName: sessionName(r, p),
 					}
 					if !cache.Contains(entry) {
 						paths = append(paths, entry)
