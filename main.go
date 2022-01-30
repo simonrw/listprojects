@@ -164,6 +164,7 @@ func main() {
 			return paths[i].FullPath
 		},
 		fuzzyfinder.WithHotReload(),
+		fuzzyfinder.WithHeader("Choose project"),
 	)
 
 	if err != nil {
