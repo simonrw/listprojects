@@ -172,11 +172,11 @@ func (c Cache) Contains(entry Path) bool {
 
 // Session wraps the functionality of tmux
 type Session struct {
-	path string
+	path Path
 }
 
-func NewSession(path string) *Session {
-	return &Session{path}
+func NewSession(p Path) *Session {
+	return &Session{p}
 }
 
 func (s Session) TmuxRunning() bool {
@@ -202,19 +202,22 @@ func (s Session) Exists() bool {
 }
 
 func (s Session) SwitchClient() {
+	cmd := exec.Command("tmux", "switch-client", "-t", s.path.SessionName)
+	cmd.Run()
 }
 
 func (s Session) CreateSession() {
-}
-
-func (s Session) Create() {
+	cmd := exec.Command("tmux", "new-session", "-d", "-c", s.path.FullPath, "-s", s.path.SessionName)
+	cmd.Run()
 }
 
 func (s Session) Join() {
+	cmd := exec.Command("tmux", "attach-session", "-s", s.path.SessionName)
+	cmd.Run()
 }
 
 func (s Session) sessionName() string {
-	return s.path
+	return s.path.SessionName
 }
 
 func sessionName(root RootDir, path string) string {
@@ -280,7 +283,7 @@ func main() {
 	}
 	// set up the tmux session
 	selectedPath := paths[idx]
-	session := NewSession(selectedPath.FullPath)
+	session := NewSession(selectedPath)
 	if session.TmuxRunning() {
 		if session.Exists() {
 			session.SwitchClient()
@@ -289,7 +292,7 @@ func main() {
 			session.SwitchClient()
 		}
 	} else {
-		session.Create()
+		session.CreateSession()
 		session.Join()
 	}
 }
