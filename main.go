@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,12 +9,13 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
+	"strings"
 
 	"github.com/adrg/xdg"
 	"github.com/jessevdk/go-flags"
-	"github.com/ktr0731/go-fuzzyfinder"
 )
 
 // helper functions
@@ -121,6 +123,53 @@ func (c Cache) Contains(entry Path) bool {
 	return c.Paths[entry]
 }
 
+// Session wraps the functionality of tmux
+type Session struct {
+	path string
+}
+
+func NewSession(path string) *Session {
+	return &Session{path}
+}
+
+func (s Session) TmuxRunning() bool {
+	return os.Getenv("TMUX") != ""
+}
+
+func (s Session) Exists() bool {
+	var buf bytes.Buffer
+	cmd := exec.Command("tmux", "ls", "-F", "#S")
+	cmd.Stdout = &buf
+	err := cmd.Run()
+	if err != nil {
+		log.Printf("error spawning command: %v", err)
+	}
+
+	output := strings.Split(buf.String(), "\n")
+	for _, session := range output {
+		if session == s.sessionName() {
+			return true
+		}
+	}
+	return false
+}
+
+func (s Session) SwitchClient() {
+}
+
+func (s Session) CreateSession() {
+}
+
+func (s Session) Create() {
+}
+
+func (s Session) Join() {
+}
+
+func (s Session) sessionName() string {
+	return s.path
+}
+
 func main() {
 
 	var opts struct {
@@ -158,18 +207,31 @@ func main() {
 		}
 	}()
 
-	idx, err := fuzzyfinder.Find(
-		&paths,
-		func(i int) string {
-			return paths[i].FullPath
-		},
-		fuzzyfinder.WithHotReload(),
-		fuzzyfinder.WithHeader("Choose project"),
-	)
+	// 	idx, err := fuzzyfinder.Find(
+	// 		&paths,
+	// 		func(i int) string {
+	// 			return paths[i].FullPath
+	// 		},
+	// 		fuzzyfinder.WithHotReload(),
+	// 		fuzzyfinder.WithHeader("Choose project"),
+	// 	)
 
-	if err != nil {
-		log.Fatal(err)
+	// 	if err != nil {
+	// 		log.Fatal(err)
+	// 	}
+	// set up the tmux session
+	// selectedPath := paths[idx]
+	selectedPath := "/home/swalker/dev/lenstracker"
+	session := NewSession(selectedPath)
+	if session.TmuxRunning() {
+		if session.Exists() {
+			session.SwitchClient()
+		} else {
+			session.CreateSession()
+			session.SwitchClient()
+		}
+	} else {
+		session.Create()
+		session.Join()
 	}
-	fmt.Printf("selected: %v\n", paths[idx])
-	cache.Write()
 }
