@@ -1,4 +1,4 @@
-module gitlab.com/srwalker101/listprojects
+module gitlab.com/srwalker101/project
 
 go 1.17
 
