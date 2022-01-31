@@ -54,16 +54,26 @@ func (s Session) tmuxRunning() bool {
 	return os.Getenv("TMUX") != ""
 }
 
-func (s Session) exists() (bool, error) {
-	var buf bytes.Buffer
-	cmd := exec.Command("tmux", "ls", "-F", "#S")
-	cmd.Stdout = &buf
+func (s Session) runTmuxCommand(args ...string) (string, error) {
+	var outBuf bytes.Buffer
+	var errBuf bytes.Buffer
+	cmd := exec.Command("tmux", args...)
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
 	err := cmd.Run()
+	if err != nil {
+		return "", fmt.Errorf("running tmux command: %w (%s)", err, errBuf.String())
+	}
+	return outBuf.String(), nil
+}
+
+func (s Session) exists() (bool, error) {
+	out, err := s.runTmuxCommand("ls", "-F", "#S")
 	if err != nil {
 		return false, fmt.Errorf("error spawning command: %w", err)
 	}
 
-	output := strings.Split(buf.String(), "\n")
+	output := strings.Split(out, "\n")
 	for _, session := range output {
 		if session == s.sessionName() {
 			return true, nil
@@ -73,18 +83,27 @@ func (s Session) exists() (bool, error) {
 }
 
 func (s Session) switchClient() error {
-	cmd := exec.Command("tmux", "switch-client", "-t", s.path.SessionName)
-	return cmd.Run()
+	_, err := s.runTmuxCommand("switch-client", "-t", s.sessionName())
+	if err != nil {
+		return fmt.Errorf("switching client: %w", err)
+	}
+	return nil
 }
 
 func (s Session) createSession() error {
-	cmd := exec.Command("tmux", "new-session", "-d", "-c", s.path.FullPath, "-s", s.path.SessionName)
-	return cmd.Run()
+	_, err := s.runTmuxCommand("new-session", "-d", "-c", s.path.FullPath, "-s", s.sessionName())
+	if err != nil {
+		return fmt.Errorf("creating new session: %w", err)
+	}
+	return nil
 }
 
 func (s Session) join() error {
-	cmd := exec.Command("tmux", "attach-session", "-s", s.path.SessionName)
-	return cmd.Run()
+	_, err := s.runTmuxCommand("attach-session", "-s", s.sessionName())
+	if err != nil {
+		return fmt.Errorf("attaching session: %w", err)
+	}
+	return nil
 }
 
 func (s Session) sessionName() string {
