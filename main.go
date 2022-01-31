@@ -183,37 +183,37 @@ func (s Session) TmuxRunning() bool {
 	return os.Getenv("TMUX") != ""
 }
 
-func (s Session) Exists() bool {
+func (s Session) Exists() (bool, error) {
 	var buf bytes.Buffer
 	cmd := exec.Command("tmux", "ls", "-F", "#S")
 	cmd.Stdout = &buf
 	err := cmd.Run()
 	if err != nil {
-		log.Printf("error spawning command: %v", err)
+		return false, fmt.Errorf("error spawning command: %w", err)
 	}
 
 	output := strings.Split(buf.String(), "\n")
 	for _, session := range output {
 		if session == s.sessionName() {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
-func (s Session) SwitchClient() {
+func (s Session) SwitchClient() error {
 	cmd := exec.Command("tmux", "switch-client", "-t", s.path.SessionName)
-	cmd.Run()
+	return cmd.Run()
 }
 
-func (s Session) CreateSession() {
+func (s Session) CreateSession() error {
 	cmd := exec.Command("tmux", "new-session", "-d", "-c", s.path.FullPath, "-s", s.path.SessionName)
-	cmd.Run()
+	return cmd.Run()
 }
 
-func (s Session) Join() {
+func (s Session) Join() error {
 	cmd := exec.Command("tmux", "attach-session", "-s", s.path.SessionName)
-	cmd.Run()
+	return cmd.Run()
 }
 
 func (s Session) sessionName() string {
@@ -291,14 +291,29 @@ func main() {
 	selectedPath := paths[idx]
 	session := NewSession(selectedPath)
 	if session.TmuxRunning() {
-		if session.Exists() {
-			session.SwitchClient()
+		exists, err := session.Exists()
+		if err != nil {
+			panic(err)
+		}
+
+		if exists {
+			if err = session.SwitchClient(); err != nil {
+				panic(err)
+			}
 		} else {
-			session.CreateSession()
-			session.SwitchClient()
+			if err =  session.CreateSession(); err != nil {
+				panic(err)
+			}
+			if err = session.SwitchClient(); err != nil {
+				panic(err)
+			}
 		}
 	} else {
-		session.CreateSession()
-		session.Join()
+		if err = session.CreateSession(); err != nil {
+			panic(err)
+		}
+		if err = session.Join(); err != nil {
+			panic(err)
+		}
 	}
 }
