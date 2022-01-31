@@ -99,7 +99,7 @@ func (s Session) createSession() error {
 }
 
 func (s Session) join() error {
-	_, err := s.runTmuxCommand("attach-session", "-s", s.sessionName())
+	_, err := s.runTmuxCommand("attach-session", "-t", s.sessionName())
 	if err != nil {
 		return fmt.Errorf("attaching session: %w", err)
 	}
