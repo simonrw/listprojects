@@ -67,6 +67,18 @@ func (s Session) runTmuxCommand(args ...string) (string, error) {
 	return outBuf.String(), nil
 }
 
+func (s Session) execTmuxCommand(args ...string) error {
+	cmd := exec.Command("tmux", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stdin = os.Stdin
+	cmd.Stderr = os.Stderr
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("execTmuxCommand: %w", err)
+	}
+	return nil
+}
+
 func (s Session) exists() (bool, error) {
 	out, err := s.runTmuxCommand("ls", "-F", "#S")
 	if err != nil {
@@ -99,11 +111,7 @@ func (s Session) createSession() error {
 }
 
 func (s Session) join() error {
-	_, err := s.runTmuxCommand("attach-session", "-t", s.sessionName())
-	if err != nil {
-		return fmt.Errorf("attaching session: %w", err)
-	}
-	return nil
+	return s.execTmuxCommand("attach-session", "-t", s.sessionName())
 }
 
 func (s Session) sessionName() string {
