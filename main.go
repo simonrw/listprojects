@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +8,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"os/exec"
 	"os/user"
 	"path"
 	"path/filepath"
@@ -19,6 +17,8 @@ import (
 	"github.com/jessevdk/go-flags"
 	"github.com/ktr0731/go-fuzzyfinder"
 	"github.com/pelletier/go-toml/v2"
+	"gitlab.com/srwalker101/project/projectpath"
+	"gitlab.com/srwalker101/project/tmux"
 )
 
 type Config struct {
@@ -82,18 +82,13 @@ func dirExists(path string) bool {
 	return s.IsDir()
 }
 
-type Path struct {
-	FullPath    string
-	SessionName string
-}
-
 type Cache struct {
-	Paths map[Path]bool
+	Paths map[projectpath.Path]bool
 	loc   string
 }
 
 type serializedCache struct {
-	Paths []Path `json:"paths"`
+	Paths []projectpath.Path `json:"paths"`
 }
 
 func (c Cache) toSerialized() serializedCache {
@@ -105,7 +100,7 @@ func (s serializedCache) fromSerialized(path string) Cache {
 	c := Cache{
 		loc: path,
 	}
-	c.Paths = make(map[Path]bool)
+	c.Paths = make(map[projectpath.Path]bool)
 	for _, p := range s.Paths {
 		c.Add(p)
 	}
@@ -120,7 +115,7 @@ func New(clear bool) (*Cache, error) {
 
 	if !fileExists(cachePath) {
 		c := Cache{loc: cachePath}
-		c.Paths = make(map[Path]bool)
+		c.Paths = make(map[projectpath.Path]bool)
 		return &c, nil
 	}
 
@@ -136,15 +131,15 @@ func New(clear bool) (*Cache, error) {
 	cache := s.fromSerialized(cachePath)
 
 	if clear {
-		cache.Paths = make(map[Path]bool)
+		cache.Paths = make(map[projectpath.Path]bool)
 	}
 	cache.Write()
 
 	return &cache, nil
 }
 
-func (c Cache) InitialPaths() []Path {
-	var paths []Path
+func (c Cache) InitialPaths() []projectpath.Path {
+	var paths []projectpath.Path
 	for p := range c.Paths {
 		paths = append(paths, p)
 	}
@@ -162,62 +157,12 @@ func (c *Cache) Write() {
 	}
 }
 
-func (c *Cache) Add(entry Path) {
+func (c *Cache) Add(entry projectpath.Path) {
 	c.Paths[entry] = true
 }
 
-func (c Cache) Contains(entry Path) bool {
+func (c Cache) Contains(entry projectpath.Path) bool {
 	return c.Paths[entry]
-}
-
-// Session wraps the functionality of tmux
-type Session struct {
-	path Path
-}
-
-func NewSession(p Path) *Session {
-	return &Session{p}
-}
-
-func (s Session) TmuxRunning() bool {
-	return os.Getenv("TMUX") != ""
-}
-
-func (s Session) Exists() (bool, error) {
-	var buf bytes.Buffer
-	cmd := exec.Command("tmux", "ls", "-F", "#S")
-	cmd.Stdout = &buf
-	err := cmd.Run()
-	if err != nil {
-		return false, fmt.Errorf("error spawning command: %w", err)
-	}
-
-	output := strings.Split(buf.String(), "\n")
-	for _, session := range output {
-		if session == s.sessionName() {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (s Session) SwitchClient() error {
-	cmd := exec.Command("tmux", "switch-client", "-t", s.path.SessionName)
-	return cmd.Run()
-}
-
-func (s Session) CreateSession() error {
-	cmd := exec.Command("tmux", "new-session", "-d", "-c", s.path.FullPath, "-s", s.path.SessionName)
-	return cmd.Run()
-}
-
-func (s Session) Join() error {
-	cmd := exec.Command("tmux", "attach-session", "-s", s.path.SessionName)
-	return cmd.Run()
-}
-
-func (s Session) sessionName() string {
-	return s.path.SessionName
 }
 
 func sessionName(root RootDir, path string) string {
@@ -252,7 +197,7 @@ func main() {
 		go func(r RootDir) {
 			if err := filepath.WalkDir(r.Path, func(p string, d fs.DirEntry, err error) error {
 				if dirExists(path.Join(p, ".git")) {
-					entry := Path{
+					entry := projectpath.Path{
 						FullPath:    p,
 						SessionName: sessionName(r, p),
 					}
@@ -289,31 +234,8 @@ func main() {
 	}
 	// set up the tmux session
 	selectedPath := paths[idx]
-	session := NewSession(selectedPath)
-	if session.TmuxRunning() {
-		exists, err := session.Exists()
-		if err != nil {
-			panic(err)
-		}
-
-		if exists {
-			if err = session.SwitchClient(); err != nil {
-				panic(err)
-			}
-		} else {
-			if err =  session.CreateSession(); err != nil {
-				panic(err)
-			}
-			if err = session.SwitchClient(); err != nil {
-				panic(err)
-			}
-		}
-	} else {
-		if err = session.CreateSession(); err != nil {
-			panic(err)
-		}
-		if err = session.Join(); err != nil {
-			panic(err)
-		}
+	session := tmux.NewSession(selectedPath)
+	if err := session.Switch(); err != nil {
+		panic(err)
 	}
 }
