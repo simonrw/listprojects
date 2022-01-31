@@ -4,9 +4,10 @@ repos:
     hooks:
       - id: go test
         name: go test
-        entry: go test
+        entry: go test ./...
         language: system
         always_run: false
+        pass_filenames: false
         stages:
           - commit
         types:
