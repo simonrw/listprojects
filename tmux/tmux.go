@@ -39,8 +39,14 @@ func (s Session) Switch() error {
 			}
 		}
 	} else {
-		if err := s.createSession(); err != nil {
-			return fmt.Errorf("creating session: %w", err)
+		exists, err := s.exists()
+		if err != nil {
+			return fmt.Errorf("checking if session exists: %w", err)
+		}
+		if !exists {
+			if err := s.createSession(); err != nil {
+				return fmt.Errorf("creating session: %w", err)
+			}
 		}
 		if err := s.join(); err != nil {
 			return fmt.Errorf("joining session: %w", err)
