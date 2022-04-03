@@ -5,6 +5,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, RwLock},
 };
+use tmux_interface::TmuxCommand;
 
 use clap::Parser;
 use serde::{Deserialize, Serialize};
@@ -73,7 +74,7 @@ impl Cache {
                         loc: cache_file,
                     };
                     cache.write().wrap_err("writing cache")?;
-                    return Ok(cache);
+                    Ok(cache)
                 }
                 _ => return Err(eyre::eyre!("IO error: {:?}", e)),
             },
@@ -154,6 +155,63 @@ impl Config {
     }
 }
 
+struct Tmux<'a> {
+    path: &'a ProjectPath,
+    client: TmuxCommand<'a>,
+}
+
+impl<'a> Tmux<'a> {
+    fn new(item: &'a ProjectPath) -> Self {
+        let client = TmuxCommand::new();
+        Self { path: item, client }
+    }
+
+    fn create(&self) -> Result<()> {
+        if self.is_running() {
+            if !self.session_exists()? {
+                self.create_session().wrap_err("creating session")?;
+            }
+            self.switch_client().wrap_err("switching client")?;
+        } else if self.session_exists()? {
+            self.create_session().wrap_err("creating session")?;
+        } else {
+            self.join().wrap_err("joining session")?;
+        }
+
+        Ok(())
+    }
+
+    fn join(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn create_session(&self) -> Result<()> {
+        todo!()
+    }
+
+    fn session_exists(&self) -> Result<bool> {
+        let res = self
+            .client
+            .has_session()
+            .target_session(&self.path.session_name)
+            .output()
+            .wrap_err("checking if session exists")?;
+        if !res.status().success() {
+            eyre::bail!("failed to check if session exists");
+        }
+
+        todo!()
+    }
+
+    fn is_running(&self) -> bool {
+        std::env::var("TMUX").is_ok()
+    }
+
+    fn switch_client(&self) -> Result<()> {
+        todo!()
+    }
+}
+
 fn main() -> Result<()> {
     color_eyre::install().unwrap();
 
@@ -177,7 +235,6 @@ fn main() -> Result<()> {
     }
 
     // spawn background thread which updates the cache
-    let thread_cache = cache.clone();
     std::thread::spawn(move || {
         // walk the file system with the given config and update the cache
         for dir in cfg.root_dirs {
@@ -203,7 +260,7 @@ fn main() -> Result<()> {
                     session_name: session_name.to_string(),
                 };
 
-                if let CacheState::Missing = thread_cache.add(project_path.clone()) {
+                if let CacheState::Missing = cache.add(project_path.clone()) {
                     let _ = tx.send(Arc::new(project_path));
                 }
             }
@@ -215,11 +272,9 @@ fn main() -> Result<()> {
         let item = &result.selected_items[0];
         // we know this is a ProjectPath, so downcast accordingly
         let item: &ProjectPath = item.as_any().downcast_ref().unwrap();
-        // set up tmux session
-        println!(
-            "setting up tmux session called {} starting in {}",
-            item.session_name, item.full_path
-        );
+
+        let session = Tmux::new(item);
+        session.create().wrap_err("creating tmux session")?;
     }
 
     Ok(())
