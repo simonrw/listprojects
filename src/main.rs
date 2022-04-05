@@ -1,8 +1,9 @@
 use eyre::{Result, WrapErr};
+use skim::prelude::*;
 use std::{
     borrow::Cow,
     collections::HashSet,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{Arc, RwLock},
 };
 use tmux_interface::TmuxCommand;
@@ -28,7 +29,7 @@ struct ProjectPath {
     session_name: String,
 }
 
-impl skim::SkimItem for ProjectPath {
+impl SkimItem for ProjectPath {
     fn text(&self) -> std::borrow::Cow<str> {
         std::borrow::Cow::Borrowed(&self.full_path)
     }
@@ -197,6 +198,7 @@ impl<'a> Tmux<'a> {
             .target_session(&self.path.session_name)
             .output()
             .wrap_err("checking if session exists")?;
+        log::debug!("{res:?}");
         if !res.status().success() {
             eyre::bail!("failed to check if session exists");
         }
@@ -213,8 +215,26 @@ impl<'a> Tmux<'a> {
     }
 }
 
+fn compute_session_name(root_dir: &RootDir, path: &Path) -> String {
+    let prefix = root_dir
+        .prefix
+        .as_ref()
+        .map(|s| s.as_str())
+        .unwrap_or_else(|| "");
+    let root_path = root_dir.path.as_path().to_str().unwrap();
+    let path = path.to_str().unwrap();
+
+    let trimmed = path
+        .strip_prefix(root_path)
+        .unwrap_or_default()
+        .trim_start_matches('/');
+
+    format!("{prefix}{trimmed}")
+}
+
 fn main() -> Result<()> {
     color_eyre::install().unwrap();
+    env_logger::init();
 
     let args = Args::parse();
 
@@ -228,7 +248,7 @@ fn main() -> Result<()> {
     let cfg = Config::open(config_path).wrap_err("opening config")?;
 
     let cache = Cache::new(args.clear).wrap_err("creating cache")?;
-    let (tx, rx): (skim::SkimItemSender, skim::SkimItemReceiver) = crossbeam_channel::unbounded();
+    let (tx, rx): (SkimItemSender, SkimItemReceiver) = crossbeam_channel::unbounded();
     let project_paths = cache.initial_paths();
     let initial_tx = tx.clone();
     for path in project_paths {
@@ -237,46 +257,78 @@ fn main() -> Result<()> {
 
     // spawn background thread which updates the cache
     std::thread::spawn(move || {
-        // walk the file system with the given config and update the cache
-        for dir in cfg.root_dirs {
-            // let walker = walkdir::WalkDir::new(dir.path);
-            let walker = ignore::WalkBuilder::new(dir.path.clone()).build();
-            let dir_path_str = dir.path.to_str().unwrap();
-            let matches = walker
-                .into_iter()
-                .filter_map(|e| e.ok())
-                .filter(|e| e.path().is_dir())
-                .filter(|e| e.path().join(".git").is_dir());
-            for result in matches {
-                let path = result.into_path();
-                let full_path_str = path.to_str().unwrap().to_string();
-                let session_name = full_path_str
-                    .strip_prefix(&dir_path_str)
-                    .unwrap()
-                    .to_owned();
+    // walk the file system with the given config and update the cache
+    for dir in cfg.root_dirs {
+        let walker = ignore::WalkBuilder::new(dir.path.clone()).build();
+        let matches = walker
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_dir())
+            .filter(|e| e.path().join(".git").is_dir());
+        for result in matches {
+            let path = result.into_path();
+            let full_path_str = path.to_str().unwrap().to_string();
+            let session_name = compute_session_name(&dir, &path);
 
-                let project_path = ProjectPath {
-                    full_path: full_path_str,
-                    // TODO
-                    session_name: session_name.to_string(),
-                };
+            let project_path = ProjectPath {
+                full_path: full_path_str,
+                session_name: session_name.to_string(),
+            };
 
-                if let CacheState::Missing = cache.add(project_path.clone()) {
-                    let _ = tx.send(Arc::new(project_path));
-                }
+            if let CacheState::Missing = cache.add(project_path.clone()) {
+                let _ = tx.send(Arc::new(project_path));
             }
         }
+    }
     });
 
-    let options = skim::SkimOptions::default();
-    if let Some(result) = skim::Skim::run_with(&options, Some(rx)) {
-        let item = &result.selected_items[0];
-        // we know this is a ProjectPath, so downcast accordingly
-        let item: &ProjectPath = item.as_any().downcast_ref().unwrap();
 
-        let session = Tmux::new(item);
+    let options = SkimOptionsBuilder::default()
+        .color(Some("light,matched_bg:-1"))
+        .build()
+        .unwrap();
+
+    if let Some(result) = Skim::run_with(&options, Some(rx)) {
+        let item = result.selected_items[0].as_ref();
+
+        // we know this is a ProjectPath, so downcast accordingly
+        let item = item.as_any().downcast_ref::<ProjectPath>().unwrap();
+        log::debug!("selected {item:?}");
+
+        let session = Tmux::new(&item);
         session.create().wrap_err("creating tmux session")?;
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    mod session_name {
+        use std::path::PathBuf;
+
+        use crate::{compute_session_name, RootDir};
+
+        #[test]
+        fn valid() {
+            let r = RootDir {
+                path: PathBuf::from("/home/a"),
+                prefix: None,
+            };
+            let p = PathBuf::from("/home/a/b/c");
+
+            assert_eq!(compute_session_name(&r, &p), "b/c");
+        }
+
+        #[test]
+        fn add_prefix() {
+            let r = RootDir {
+                path: PathBuf::from("/home/a"),
+                prefix: Some("a/".to_string()),
+            };
+            let p = PathBuf::from("/home/a/b/c");
+
+            assert_eq!(compute_session_name(&r, &p), "a/b/c");
+        }
+    }
 }
