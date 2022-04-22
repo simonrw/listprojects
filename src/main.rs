@@ -22,6 +22,7 @@ struct Args {
 // Cache types
 
 #[derive(Debug, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "PascalCase")]
 struct ProjectPath {
     full_path: String,
     session_name: String,
@@ -46,7 +47,7 @@ struct CacheInner {
 
 impl Cache {
     fn new(clear: bool) -> Result<Self> {
-        let cache_dir = dirs::cache_dir()
+        let cache_dir = dbg!(dirs::cache_dir())
             .unwrap_or_else(|| PathBuf::from("~/.cache"))
             .join("project");
         std::fs::create_dir_all(&cache_dir).wrap_err("creating cache directory")?;
