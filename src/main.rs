@@ -47,9 +47,9 @@ struct CacheInner {
 
 impl Cache {
     fn new(clear: bool) -> Result<Self> {
-        let cache_dir = dirs::cache_dir()
+        let cache_dir = dbg!(dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("~/.cache"))
-            .join("project");
+            .join("project"));
         std::fs::create_dir_all(&cache_dir).wrap_err("creating cache directory")?;
         let cache_file = cache_dir.join("config.json");
 
@@ -213,6 +213,14 @@ impl<'a> Tmux<'a> {
     }
 }
 
+fn compute_session_name(full_path_str: &str, dir_path_str: &str) -> String {
+    let dir_removed = full_path_str
+        .strip_prefix(dir_path_str)
+        .unwrap_or(full_path_str);
+    let leading_slash_removed = dir_removed.strip_prefix('/').unwrap_or(dir_removed);
+    leading_slash_removed.to_owned()
+}
+
 fn main() -> Result<()> {
     color_eyre::install().unwrap();
 
@@ -239,7 +247,6 @@ fn main() -> Result<()> {
     std::thread::spawn(move || {
         // walk the file system with the given config and update the cache
         for dir in cfg.root_dirs {
-            // let walker = walkdir::WalkDir::new(dir.path);
             let walker = ignore::WalkBuilder::new(dir.path.clone()).build();
             let dir_path_str = dir.path.to_str().unwrap();
             let matches = walker
@@ -250,15 +257,11 @@ fn main() -> Result<()> {
             for result in matches {
                 let path = result.into_path();
                 let full_path_str = path.to_str().unwrap().to_string();
-                let session_name = full_path_str
-                    .strip_prefix(&dir_path_str)
-                    .unwrap()
-                    .to_owned();
+                let session_name = compute_session_name(&full_path_str, dir_path_str);
 
                 let project_path = ProjectPath {
                     full_path: full_path_str,
-                    // TODO
-                    session_name: session_name.to_string(),
+                    session_name,
                 };
 
                 if let CacheState::Missing = cache.add(project_path.clone()) {
@@ -279,4 +282,20 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_name() {
+        let full_path = "/Users/user/work/project/a/b/c";
+        let dir_path_str = "/Users/user/work";
+
+        assert_eq!(
+            compute_session_name(full_path, dir_path_str),
+            "project/a/b/c"
+        );
+    }
 }
