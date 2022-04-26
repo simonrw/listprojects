@@ -47,9 +47,9 @@ struct CacheInner {
 
 impl Cache {
     fn new(clear: bool) -> Result<Self> {
-        let cache_dir = dbg!(dirs::cache_dir()
+        let cache_dir = dirs::cache_dir()
             .unwrap_or_else(|| PathBuf::from("~/.cache"))
-            .join("project"));
+            .join("project");
         std::fs::create_dir_all(&cache_dir).wrap_err("creating cache directory")?;
         let cache_file = cache_dir.join("config.json");
 
@@ -174,8 +174,9 @@ impl<'a> Tmux<'a> {
             }
             self.switch_client().wrap_err("switching client")?;
         } else if self.session_exists()? {
-            self.create_session().wrap_err("creating session")?;
+            self.join().wrap_err("joining session")?;
         } else {
+            self.create_session().wrap_err("creating session")?;
             self.join().wrap_err("joining session")?;
         }
 
@@ -183,11 +184,21 @@ impl<'a> Tmux<'a> {
     }
 
     fn join(&self) -> Result<()> {
-        todo!()
+        self.client
+            .attach_session()
+            .target_session(&self.path.session_name)
+            .output()?;
+        Ok(())
     }
 
     fn create_session(&self) -> Result<()> {
-        todo!()
+        self.client
+            .new_session()
+            .detached()
+            .start_directory(&self.path.full_path)
+            .session_name(&self.path.session_name)
+            .output()?;
+        Ok(())
     }
 
     fn session_exists(&self) -> Result<bool> {
@@ -197,11 +208,7 @@ impl<'a> Tmux<'a> {
             .target_session(&self.path.session_name)
             .output()
             .wrap_err("checking if session exists")?;
-        if !res.status().success() {
-            eyre::bail!("failed to check if session exists");
-        }
-
-        todo!()
+        Ok(res.status().success())
     }
 
     fn is_running(&self) -> bool {
@@ -209,7 +216,11 @@ impl<'a> Tmux<'a> {
     }
 
     fn switch_client(&self) -> Result<()> {
-        todo!()
+        self.client
+            .switch_client()
+            .target_session(&self.path.session_name)
+            .output()?;
+        Ok(())
     }
 }
 
