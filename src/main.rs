@@ -284,6 +284,10 @@ fn main() -> Result<()> {
 
     let options = skim::SkimOptions::default();
     if let Some(result) = skim::Skim::run_with(&options, Some(rx)) {
+        if result.is_abort {
+            return Ok(());
+        }
+
         let item = &result.selected_items[0];
         // we know this is a ProjectPath, so downcast accordingly
         let item: &ProjectPath = item.as_any().downcast_ref().unwrap();
