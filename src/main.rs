@@ -282,7 +282,14 @@ fn main() -> Result<()> {
         }
     });
 
-    let options = skim::SkimOptions::default();
+    let options = skim::SkimOptions {
+        color: Some("dark,matched_bg:-1"),
+        tiebreak: Some("begin".to_string()),
+        no_mouse: true,
+        tabstop: Some("4"),
+        inline_info: true,
+        ..Default::default()
+    };
     if let Some(result) = skim::Skim::run_with(&options, Some(rx)) {
         if result.is_abort {
             return Ok(());
