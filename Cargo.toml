@@ -25,3 +25,9 @@ shellexpand = "2.1.0"
 skim = "0.9.4"
 tmux_interface = "0.2.1"
 toml = "0.5.8"
+
+[profile.release]
+# faster local release builds
+incremental = true
+debug = 1
+lto = "off"
