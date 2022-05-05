@@ -22,7 +22,7 @@ rayon = "1.5.1"
 serde = { version = "1.0.136", features = ["derive"] }
 serde_json = "1.0.79"
 shellexpand = "2.1.0"
-skim = "0.9.4"
+skim = { git = "https://github.com/mindriot101/skim" }
 tmux_interface = "0.2.1"
 toml = "0.5.8"
 
