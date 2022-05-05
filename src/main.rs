@@ -1,4 +1,5 @@
 use eyre::{Result, WrapErr};
+use skim::SkimOptions;
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -232,6 +233,40 @@ fn compute_session_name(full_path_str: &str, dir_path_str: &str) -> String {
     leading_slash_removed.to_owned()
 }
 
+trait SkimOptionsFromEnv {
+    fn from_env() -> Self
+    where
+        Self: Sized;
+}
+
+impl SkimOptionsFromEnv for SkimOptions<'_> {
+    fn from_env() -> Self
+    where
+        Self: Sized,
+    {
+        let colour = std::env::var("SKIM_DEFAULT_OPTIONS")
+            .map(|default_options| {
+                if default_options.contains("light") {
+                    Some("light,matched_bg:-1")
+                } else if default_options.contains("dark") {
+                    Some("dark,matched_bg:-1")
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(None);
+
+        skim::SkimOptions {
+            color: colour,
+            tiebreak: Some("begin".to_string()),
+            no_mouse: true,
+            tabstop: Some("4"),
+            inline_info: true,
+            ..Default::default()
+        }
+    }
+}
+
 fn main() -> Result<()> {
     color_eyre::install().unwrap();
 
@@ -282,14 +317,7 @@ fn main() -> Result<()> {
         }
     });
 
-    let options = skim::SkimOptions {
-        color: Some("dark,matched_bg:-1"),
-        tiebreak: Some("begin".to_string()),
-        no_mouse: true,
-        tabstop: Some("4"),
-        inline_info: true,
-        ..Default::default()
-    };
+    let options = skim::SkimOptions::from_env();
     if let Some(result) = skim::Skim::run_with(&options, Some(rx)) {
         if result.is_abort {
             return Ok(());
