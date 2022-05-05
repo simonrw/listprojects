@@ -989,7 +989,7 @@ checksum = "7fdf1b9db47230893d76faad238fd6097fd6d6a9245cd7a4d90dbd639536bbd2"
 [[package]]
 name = "skim"
 version = "0.9.4"
-source = "git+https://github.com/mindriot101/skim#3dc0c4ee1977d2bb109f92e8cfcef48dc4510b00"
+source = "git+https://github.com/mindriot101/skim?rev=v0.9.5-alpha.1#ad8f37680f790ea22a2cae946b330de4bf6c5aea"
 dependencies = [
  "atty",
  "beef",
