@@ -104,6 +104,11 @@ fn main() -> eyre::Result<()> {
         }
         builder
     }
+    .follow_links(false)
+    .ignore(true)
+    .git_ignore(true)
+    .git_global(true)
+    .git_exclude(true)
     .standard_filters(false)
     .build_parallel();
 
@@ -113,15 +118,30 @@ fn main() -> eyre::Result<()> {
         walker.run(|| {
             Box::new(|entry| {
                 if let Ok(entry) = entry {
-                    if !entry.path().is_dir() {
+                    let path = entry.path();
+                    if !path.is_dir() {
                         return WalkState::Continue;
                     }
 
-                    if !entry.path().ends_with(".git") {
+                    // skip common directories
+                    if path.ends_with(".venv")
+                        || path.ends_with("node_modules")
+                        || path.ends_with("venv")
+                        || path.ends_with("__pycache__")
+                        || path.ends_with(".jj")
+                    {
+                        return WalkState::Skip;
+                    }
+
+                    if !path.ends_with(".git") {
                         return WalkState::Continue;
                     }
 
-                    let path = entry.path().parent().unwrap();
+                    // if path.display().to_string().contains(".git") {
+                    //     return WalkState::Skip;
+                    // }
+
+                    let path = path.parent().unwrap();
 
                     let item: Arc<dyn SkimItem> = Arc::new(SelectablePath {
                         path: path.to_path_buf(),
