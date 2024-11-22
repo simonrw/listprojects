@@ -1,4 +1,7 @@
-use std::{os::unix::process::CommandExt, path::PathBuf};
+use std::{
+    os::unix::process::CommandExt,
+    path::{Path, PathBuf},
+};
 
 use clap::Parser;
 use color_eyre::eyre::{self, Context, OptionExt};
@@ -11,6 +14,15 @@ struct Args {
     root: Option<Vec<PathBuf>>,
 }
 
+fn compute_session_name(path: impl AsRef<Path>) -> String {
+    let path = path.as_ref();
+    let mut iter = path.components().rev();
+    let file = iter.next().unwrap().as_os_str().to_string_lossy();
+    let parent = iter.next().unwrap().as_os_str().to_string_lossy();
+    format!("{}/{}", parent, file)
+}
+
+#[derive(Debug)]
 struct Tmux {
     path: PathBuf,
     session_name: String,
@@ -21,11 +33,7 @@ impl Tmux {
         let path = path.into();
         Self {
             path: path.clone(),
-            session_name: format!(
-                "{}/{}",
-                path.parent().unwrap().display(),
-                path.file_name().unwrap().to_string_lossy()
-            ),
+            session_name: compute_session_name(path),
         }
     }
 
@@ -184,5 +192,15 @@ struct SelectablePath {
 impl SkimItem for SelectablePath {
     fn text(&self) -> Cow<str> {
         Cow::Owned(self.path.display().to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compute_session_name;
+
+    #[test]
+    fn test_compute_session_name() {
+        assert_eq!(compute_session_name("/Users/simon/dev/foo"), "dev/foo");
     }
 }
