@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::{os::unix::process::CommandExt, path::PathBuf};
 
 use clap::Parser;
 use color_eyre::eyre::{self, Context, OptionExt};
@@ -9,6 +9,81 @@ use skim::prelude::*;
 struct Args {
     /// Root paths to search (default: ~/dev ~/work)
     root: Option<Vec<PathBuf>>,
+}
+
+struct Tmux {
+    path: PathBuf,
+    session_name: String,
+}
+
+impl Tmux {
+    fn new(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        Self {
+            path: path.clone(),
+            session_name: format!(
+                "{}/{}",
+                path.parent().unwrap().display(),
+                path.file_name().unwrap().to_string_lossy()
+            ),
+        }
+    }
+
+    fn activate(&self) -> std::io::Error {
+        if Self::in_tmux_session() {
+            if self.session_exists().unwrap() {
+                self.switch_session()
+            } else {
+                self.create_session().expect("creating session");
+                self.switch_session()
+            }
+        } else {
+            self.create_session().expect("creating session");
+            self.attach_session()
+        }
+    }
+
+    fn in_tmux_session() -> bool {
+        std::env::var("TMUX").is_ok()
+    }
+
+    fn session_exists(&self) -> eyre::Result<bool> {
+        let output = std::process::Command::new("tmux")
+            .arg("has-session")
+            .arg("-t")
+            .arg(&self.session_name)
+            .output()
+            .wrap_err("Checking if tmux session exists")?;
+
+        Ok(output.status.success())
+    }
+
+    fn switch_session(&self) -> std::io::Error {
+        std::process::Command::new("tmux")
+            .args(["switch-client", "-t", &self.session_name])
+            .exec()
+    }
+
+    fn create_session(&self) -> eyre::Result<()> {
+        std::process::Command::new("tmux")
+            .args([
+                "new-session",
+                "-d",
+                "-s",
+                &self.session_name,
+                "-c",
+                &self.path.display().to_string(),
+            ])
+            .spawn()
+            .wrap_err("creating new session")?;
+        Ok(())
+    }
+
+    fn attach_session(&self) -> std::io::Error {
+        std::process::Command::new("tmux")
+            .args(["attach-session", "-t", &self.session_name])
+            .exec()
+    }
 }
 
 fn main() -> eyre::Result<()> {
@@ -30,12 +105,11 @@ fn main() -> eyre::Result<()> {
         builder
     }
     .standard_filters(false)
-    // .hidden(true)
     .build_parallel();
 
     let (tx, rx) = unbounded();
 
-    let handle = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         walker.run(|| {
             Box::new(|entry| {
                 if let Ok(entry) = entry {
@@ -71,11 +145,13 @@ fn main() -> eyre::Result<()> {
         .selected_items
         .into_iter()
         .map(|item| {
-            let item = item.as_any().downcast_ref::<SelectablePath>().unwrap();
+            let item = (*item).as_any().downcast_ref::<SelectablePath>().unwrap();
             item.path.clone()
         })
         .collect::<Vec<_>>();
-    dbg!(&items);
+    let chosen_path = items.first().unwrap();
+    let session = Tmux::new(chosen_path);
+    session.activate();
 
     Ok(())
 }
