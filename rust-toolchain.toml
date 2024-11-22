@@ -1,0 +1,4 @@
+[toolchain]
+channel = "beta"
+components = ["rustfmt", "rust-analyzer"]
+profile = "minimal"
