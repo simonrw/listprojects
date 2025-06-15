@@ -8,7 +8,9 @@ use color_eyre::eyre::{self, Context, OptionExt};
 use ignore::{WalkBuilder, WalkState};
 use skim::prelude::*;
 
+/// List all projects
 #[derive(Parser)]
+#[command(version, about)]
 struct Args {
     /// Root paths to search (default: ~/dev ~/work)
     root: Option<Vec<PathBuf>>,
