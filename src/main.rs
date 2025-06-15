@@ -162,8 +162,16 @@ fn main() -> eyre::Result<()> {
         });
     });
 
-    let selected =
-        Skim::run_with(&SkimOptions::default(), Some(rx)).ok_or_eyre("running fuzzy finder")?;
+    let system_colour_theme = dark_light::detect().wrap_err("detecting system colour theme")?;
+    let options = SkimOptions {
+        color: match system_colour_theme {
+            dark_light::Mode::Dark => Some("dark".to_string()),
+            _ => Some("light".to_string()),
+        },
+        ..Default::default()
+    };
+
+    let selected = Skim::run_with(&options, Some(rx)).ok_or_eyre("running fuzzy finder")?;
 
     if selected.is_abort {
         return Ok(());
