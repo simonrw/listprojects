@@ -200,7 +200,7 @@ struct SelectablePath {
 }
 
 impl SkimItem for SelectablePath {
-    fn text(&self) -> Cow<str> {
+    fn text(&self) -> Cow<'_, str> {
         Cow::Owned(self.path.display().to_string())
     }
 }
