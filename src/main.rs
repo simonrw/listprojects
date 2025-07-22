@@ -1,12 +1,17 @@
 use std::{
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
+    sync::Mutex,
 };
 
 use clap::Parser;
 use color_eyre::eyre::{self, Context, OptionExt};
 use ignore::{WalkBuilder, WalkState};
 use skim::prelude::*;
+
+use crate::disk_cache::Cache;
+
+mod disk_cache;
 
 /// List all projects
 #[derive(Parser)]
@@ -100,6 +105,8 @@ fn main() -> eyre::Result<()> {
     color_eyre::install().wrap_err("Installing color-eyre handler")?;
     let args = Args::parse();
 
+    let cache = Arc::new(Mutex::new(Cache::new()));
+
     let home = dirs::home_dir().ok_or_else(|| eyre::eyre!("Calculating home directory"))?;
     let roots = args
         .root
@@ -124,42 +131,50 @@ fn main() -> eyre::Result<()> {
 
     let (tx, rx) = unbounded();
 
+    cache.lock().unwrap().prepopulate_with(tx.clone());
+
+    let background_cache = cache.clone();
     std::thread::spawn(move || {
         walker.run(|| {
-            Box::new(|entry| {
-                if let Ok(entry) = entry {
-                    let path = entry.path();
-                    if !path.is_dir() {
-                        return WalkState::Continue;
+            Box::new({
+                let cache = background_cache.clone();
+                let tx = tx.clone();
+
+                move |entry| {
+                    if let Ok(entry) = entry {
+                        let path = entry.path();
+                        if !path.is_dir() {
+                            return WalkState::Continue;
+                        }
+
+                        // skip common directories
+                        if path.ends_with(".venv")
+                            || path.ends_with("node_modules")
+                            || path.ends_with("venv")
+                            || path.ends_with("__pycache__")
+                            || path.ends_with(".jj")
+                        {
+                            return WalkState::Skip;
+                        }
+
+                        if !path.ends_with(".git") {
+                            return WalkState::Continue;
+                        }
+
+                        // if path.display().to_string().contains(".git") {
+                        //     return WalkState::Skip;
+                        // }
+
+                        let path = path.parent().unwrap();
+
+                        let pb = path.to_path_buf();
+                        cache.lock().unwrap().add_to_cache(pb.clone());
+                        let item: Arc<dyn SkimItem> = Arc::new(SelectablePath { path: pb.clone() });
+
+                        let _ = tx.send(item);
                     }
-
-                    // skip common directories
-                    if path.ends_with(".venv")
-                        || path.ends_with("node_modules")
-                        || path.ends_with("venv")
-                        || path.ends_with("__pycache__")
-                        || path.ends_with(".jj")
-                    {
-                        return WalkState::Skip;
-                    }
-
-                    if !path.ends_with(".git") {
-                        return WalkState::Continue;
-                    }
-
-                    // if path.display().to_string().contains(".git") {
-                    //     return WalkState::Skip;
-                    // }
-
-                    let path = path.parent().unwrap();
-
-                    let item: Arc<dyn SkimItem> = Arc::new(SelectablePath {
-                        path: path.to_path_buf(),
-                    });
-
-                    let _ = tx.send(item);
+                    WalkState::Continue
                 }
-                WalkState::Continue
             })
         });
     });
@@ -175,6 +190,9 @@ fn main() -> eyre::Result<()> {
 
     let selected = Skim::run_with(&options, Some(rx)).ok_or_eyre("running fuzzy finder")?;
 
+    // explicitly save the cache
+    cache.lock().unwrap().save().unwrap();
+
     if selected.is_abort {
         return Ok(());
     }
@@ -188,6 +206,7 @@ fn main() -> eyre::Result<()> {
         })
         .collect::<Vec<_>>();
     let chosen_path = items.first().unwrap();
+
     let session = Tmux::new(chosen_path);
     session.activate();
 
