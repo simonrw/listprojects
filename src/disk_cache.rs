@@ -2,7 +2,7 @@ use std::{
     collections::HashSet,
     io::Write,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::Arc,
 };
 
 use skim::{SkimItem, SkimItemSender};
@@ -30,11 +30,10 @@ impl Cache {
         let items = if cache_filename.is_file() {
             let contents =
                 std::fs::read_to_string(&cache_filename).expect("reading cache contents");
-            let items = contents
+            contents
                 .lines()
                 .map(PathBuf::from)
-                .collect::<HashSet<PathBuf>>();
-            items
+                .collect::<HashSet<PathBuf>>()
         } else {
             HashSet::new()
         };
@@ -51,8 +50,9 @@ impl Cache {
         }
     }
 
-    pub fn add_to_cache(&mut self, value: impl Into<PathBuf>) {
-        self.items.insert(value.into());
+    /// Add an item to the cache if not already present, and return true if the cache was updated
+    pub fn add_to_cache(&mut self, value: impl Into<PathBuf>) -> bool {
+        self.items.insert(value.into())
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {

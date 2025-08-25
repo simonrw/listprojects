@@ -152,7 +152,7 @@ fn main() -> eyre::Result<()> {
                             || path.ends_with("node_modules")
                             || path.ends_with("venv")
                             || path.ends_with("__pycache__")
-                            || path.ends_with(".jj")
+                            || path.extension().is_some_and(|ext| ext == "jj")
                         {
                             return WalkState::Skip;
                         }
@@ -168,10 +168,11 @@ fn main() -> eyre::Result<()> {
                         let path = path.parent().unwrap();
 
                         let pb = path.to_path_buf();
-                        cache.lock().unwrap().add_to_cache(pb.clone());
-                        let item: Arc<dyn SkimItem> = Arc::new(SelectablePath { path: pb.clone() });
-
-                        let _ = tx.send(item);
+                        if cache.lock().unwrap().add_to_cache(pb.clone()) {
+                            let item: Arc<dyn SkimItem> =
+                                Arc::new(SelectablePath { path: pb.clone() });
+                            let _ = tx.send(item);
+                        }
                     }
                     WalkState::Continue
                 }
