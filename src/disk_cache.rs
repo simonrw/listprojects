@@ -1,6 +1,6 @@
 use std::{
     collections::HashSet,
-    io::Write,
+    io::{self, Write},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -41,9 +41,16 @@ impl Cache {
         Cache { items }
     }
 
+    pub fn clear(&mut self) -> Result<(), io::Error> {
+        eprintln!("clearing cache");
+        self.items.clear();
+        let new_items = std::iter::empty();
+        self.save_items(new_items, cache_filename());
+        Ok(())
+    }
+
+    /// Implementation for prepopulating the cache with project names
     pub fn prepopulate_with(&self, tx: SkimItemSender) {
-        // Implementation for prepopulating the cache with project names
-        eprintln!("prepopulating cache with {} items", self.items.len());
         for p in &self.items {
             let item: Arc<dyn SkimItem> = Arc::new(SelectablePath { path: p.clone() });
             let _ = tx.send(item);
@@ -55,7 +62,7 @@ impl Cache {
         self.items.insert(value.into())
     }
 
-    pub fn save(&self) -> Result<(), std::io::Error> {
+    pub fn save(&self) -> Result<(), io::Error> {
         // Implementation for saving the cache to disk
         self.save_items(self.items.iter().cloned(), cache_filename());
         Ok(())

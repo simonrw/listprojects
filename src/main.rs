@@ -19,6 +19,10 @@ mod disk_cache;
 struct Args {
     /// Root paths to search (default: ~/dev ~/work)
     root: Option<Vec<PathBuf>>,
+
+    /// Clear the cache before running
+    #[clap(short, long)]
+    clear: bool,
 }
 
 fn compute_session_name(path: impl AsRef<Path>) -> String {
@@ -106,6 +110,11 @@ fn main() -> eyre::Result<()> {
     let args = Args::parse();
 
     let cache = Arc::new(Mutex::new(Cache::new()));
+    if args.clear
+        && let Err(_e) = cache.lock().unwrap().clear()
+    {
+        todo!()
+    };
 
     let home = dirs::home_dir().ok_or_else(|| eyre::eyre!("Calculating home directory"))?;
     let roots = args
