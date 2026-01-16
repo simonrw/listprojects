@@ -10,10 +10,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Building and Running
 ```bash
-cargo build               # Build the project
-cargo run                 # Run with default roots (~/dev, ~/work)
-cargo run -- ~/projects   # Run with custom root directory
-cargo run -- --clear      # Clear cache before running
+cargo build                      # Build the project
+cargo run                        # Run with default roots (~/dev, ~/work)
+cargo run -- ~/projects          # Run with custom root directory
+cargo run -- --clear             # Clear cache before running
+cargo run -- --list              # Non-interactive mode: print all directories to stdout
+cargo run -- --list ~/projects   # List mode with custom root directory
 ```
 
 ### Testing
@@ -32,11 +34,20 @@ cargo check               # Check without building
 ## Architecture
 
 ### Core Workflow
+
+**Interactive Mode** (default):
 1. **Cache Loading**: On startup, `Cache::new()` loads previously discovered projects from `~/.cache/listprojects/cache.txt`
 2. **Pre-population**: Cached projects are immediately sent to the fuzzy finder via `prepopulate_with()`
 3. **Background Scan**: A parallel directory walker scans root directories for `.git` folders
 4. **Incremental Updates**: New projects found during scan are added to both cache and fuzzy finder in real-time
 5. **Selection & Activation**: User selects a project, and a tmux session is created/switched
+
+**Non-Interactive Mode** (`--list` flag):
+1. **Cache Loading**: Same as interactive mode
+2. **Pre-population**: Cached projects are sent to channel and printed immediately to stdout
+3. **Background Scan**: Same as interactive mode
+4. **Streaming Output**: New projects from background scan are printed to stdout as they're discovered
+5. **Completion**: Process exits when background scan completes and cache is saved
 
 ### Key Components
 

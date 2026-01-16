@@ -42,7 +42,6 @@ impl Cache {
     }
 
     pub fn clear(&mut self) -> Result<(), io::Error> {
-        eprintln!("clearing cache");
         self.items.clear();
         let new_items = std::iter::empty();
         self.save_items(new_items, cache_filename());
@@ -70,7 +69,6 @@ impl Cache {
 
     fn save_items(&self, items: impl Iterator<Item = PathBuf>, output_path: impl AsRef<Path>) {
         let items: Vec<_> = items.collect();
-        eprintln!("saving {} items", items.len());
         let mut f = std::fs::File::create(output_path).expect("creating cache file");
         for item in items {
             writeln!(f, "{}", item.display()).expect("writing item to cache file");
@@ -81,7 +79,6 @@ impl Cache {
 
 impl Drop for Cache {
     fn drop(&mut self) {
-        eprintln!("persisting cache to disk");
         self.save().expect("Failed to save cache");
     }
 }

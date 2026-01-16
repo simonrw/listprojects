@@ -23,6 +23,10 @@ struct Args {
     /// Clear the cache before running
     #[clap(short, long)]
     clear: bool,
+
+    /// Non-interactive mode: print all found directories to stdout
+    #[clap(short, long)]
+    list: bool,
 }
 
 fn compute_session_name(path: impl AsRef<Path>) -> String {
@@ -188,6 +192,19 @@ fn main() -> eyre::Result<()> {
             })
         });
     });
+
+    if args.list {
+        // Non-interactive mode: print directories as they are discovered
+        for item in rx {
+            let path = (*item).as_any().downcast_ref::<SelectablePath>().unwrap();
+            println!("{}", path.path.display());
+        }
+
+        // Save cache before exiting
+        cache.lock().unwrap().save().unwrap();
+
+        return Ok(());
+    }
 
     let system_colour_theme = dark_light::detect().wrap_err("detecting system colour theme")?;
     let options = SkimOptions {
