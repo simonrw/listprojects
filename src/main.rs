@@ -97,7 +97,7 @@ impl Tmux {
                 "-c",
                 &self.path.display().to_string(),
             ])
-            .spawn()
+            .status()
             .wrap_err("creating new session")?;
         Ok(())
     }
