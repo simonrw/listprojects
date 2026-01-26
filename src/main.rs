@@ -88,7 +88,7 @@ impl Tmux {
     }
 
     fn create_session(&self) -> eyre::Result<()> {
-        std::process::Command::new("tmux")
+        let status = std::process::Command::new("tmux")
             .args([
                 "new-session",
                 "-d",
@@ -97,8 +97,10 @@ impl Tmux {
                 "-c",
                 &self.path.display().to_string(),
             ])
-            .spawn()
+            .status()
             .wrap_err("creating new session")?;
+
+        eyre::ensure!(status.success(), "creating new session failed");
         Ok(())
     }
 
