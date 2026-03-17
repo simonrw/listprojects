@@ -27,6 +27,10 @@ struct Args {
     /// Non-interactive mode: print all found directories to stdout
     #[clap(short, long)]
     list: bool,
+
+    /// Assume the project is given on the command line and just create/reuse a tmux session
+    #[clap(short, long)]
+    path: Option<String>,
 }
 
 fn compute_session_name(path: impl AsRef<Path>) -> String {
@@ -111,6 +115,17 @@ impl Tmux {
     }
 }
 
+fn expand_user(given: impl AsRef<str>) -> eyre::Result<PathBuf> {
+    let given = given.as_ref();
+    if !given.contains("~") {
+        return Ok(PathBuf::from(given));
+    }
+
+    let home_dir = std::env::home_dir().ok_or_eyre("No home dir found")?;
+    let s = given.replace("~", &home_dir.display().to_string());
+    Ok(PathBuf::from(s))
+}
+
 fn main() -> eyre::Result<()> {
     color_eyre::install().wrap_err("Installing color-eyre handler")?;
     let args = Args::parse();
@@ -121,6 +136,18 @@ fn main() -> eyre::Result<()> {
     {
         todo!()
     };
+
+    // shortcut - if the project path is specified on the command line then just switch to that
+    // project
+    if let Some(path) = args.path {
+        let full_path = expand_user(path)
+            .context("failed to expand ~ for user directory")?
+            .canonicalize()
+            .wrap_err("Given path does not exist")?;
+        let session = Tmux::new(full_path);
+        session.activate();
+        return Ok(());
+    }
 
     let home = dirs::home_dir().ok_or_else(|| eyre::eyre!("Calculating home directory"))?;
     let roots = args
