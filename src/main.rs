@@ -144,6 +144,11 @@ fn main() -> eyre::Result<()> {
             .context("failed to expand ~ for user directory")?
             .canonicalize()
             .wrap_err("Given path does not exist")?;
+        {
+            let mut c = cache.lock().unwrap();
+            c.record_visit(&full_path);
+            c.save().unwrap();
+        }
         let session = Tmux::new(full_path);
         session.activate();
         return Ok(());
@@ -262,6 +267,12 @@ fn main() -> eyre::Result<()> {
         })
         .collect::<Vec<_>>();
     let chosen_path = items.first().unwrap();
+
+    {
+        let mut c = cache.lock().unwrap();
+        c.record_visit(chosen_path);
+        c.save().unwrap();
+    }
 
     let session = Tmux::new(chosen_path);
     session.activate();
