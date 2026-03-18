@@ -283,7 +283,10 @@ mod tests {
     fn parse_plain_path_no_tabs() {
         let path = temp_cache_file("plain_path", "/home/user/dev/project\n");
         let cache = cache_from_file(&path);
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/project")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/project"))
+            .unwrap();
         assert!((entry.score - 0.0).abs() < 1e-9);
         assert!(entry.last_accessed.is_none());
         std::fs::remove_file(&path).ok();
@@ -291,12 +294,12 @@ mod tests {
 
     #[test]
     fn parse_tab_separated_line() {
-        let path = temp_cache_file(
-            "tab_sep",
-            "/home/user/dev/project\t4.200000\t1710700800\n",
-        );
+        let path = temp_cache_file("tab_sep", "/home/user/dev/project\t4.200000\t1710700800\n");
         let cache = cache_from_file(&path);
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/project")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/project"))
+            .unwrap();
         assert!((entry.score - 4.2).abs() < 1e-6);
         assert_eq!(entry.last_accessed, Some(1_710_700_800));
         std::fs::remove_file(&path).ok();
@@ -306,7 +309,10 @@ mod tests {
     fn parse_score_no_timestamp() {
         let path = temp_cache_file("score_no_ts", "/home/user/dev/project\t2.500000\n");
         let cache = cache_from_file(&path);
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/project")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/project"))
+            .unwrap();
         assert!((entry.score - 2.5).abs() < 1e-6);
         assert!(entry.last_accessed.is_none());
         std::fs::remove_file(&path).ok();
@@ -314,10 +320,7 @@ mod tests {
 
     #[test]
     fn parse_empty_lines_skipped() {
-        let path = temp_cache_file(
-            "empty_lines",
-            "/home/a\n\n/home/b\n\n",
-        );
+        let path = temp_cache_file("empty_lines", "/home/a\n\n/home/b\n\n");
         let cache = cache_from_file(&path);
         assert_eq!(cache.items.len(), 2);
         std::fs::remove_file(&path).ok();
@@ -374,11 +377,17 @@ mod tests {
         let restored = cache_from_file(&out);
         assert_eq!(restored.items.len(), 2);
 
-        let alpha = restored.items.get(&PathBuf::from("/home/user/dev/alpha")).unwrap();
+        let alpha = restored
+            .items
+            .get(&PathBuf::from("/home/user/dev/alpha"))
+            .unwrap();
         assert!((alpha.score - 3.14).abs() < 0.001);
         assert_eq!(alpha.last_accessed, Some(1_710_700_800));
 
-        let beta = restored.items.get(&PathBuf::from("/home/user/dev/beta")).unwrap();
+        let beta = restored
+            .items
+            .get(&PathBuf::from("/home/user/dev/beta"))
+            .unwrap();
         assert!((beta.score - 0.5).abs() < 0.001);
         assert!(beta.last_accessed.is_none());
 
@@ -393,7 +402,10 @@ mod tests {
             items: HashMap::new(),
         };
         assert!(cache.add_to_cache("/home/user/dev/new_project"));
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/new_project")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/new_project"))
+            .unwrap();
         assert!((entry.score - 0.1).abs() < 1e-9);
         assert!(entry.last_accessed.is_none());
     }
@@ -415,7 +427,10 @@ mod tests {
             items: HashMap::new(),
         };
         cache.record_visit(Path::new("/home/user/dev/fresh"));
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/fresh")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/fresh"))
+            .unwrap();
         // or_insert gives score=0.0, current_score(now)=0.0, new = 0.0 + 1.0 = 1.0
         assert!((entry.score - 1.0).abs() < 1e-9);
         assert!(entry.last_accessed.is_some());
@@ -431,7 +446,10 @@ mod tests {
         );
         let mut cache = Cache { items };
         cache.record_visit(Path::new("/home/user/dev/proj"));
-        let entry = cache.items.get(&PathBuf::from("/home/user/dev/proj")).unwrap();
+        let entry = cache
+            .items
+            .get(&PathBuf::from("/home/user/dev/proj"))
+            .unwrap();
         // decayed = 4.0 * 2^(-3600/259200) ≈ 3.962, new = decayed + 1.0 ≈ 4.962
         let expected_decayed = 4.0 * (2.0_f64).powf(-3600.0 / HALF_LIFE);
         assert!(
