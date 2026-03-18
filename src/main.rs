@@ -298,5 +298,27 @@ mod tests {
     #[test]
     fn test_compute_session_name() {
         assert_eq!(compute_session_name("/Users/simon/dev/foo"), "dev/foo");
+        assert_eq!(compute_session_name("/Users/simon/work/bar"), "work/bar");
+        assert_eq!(
+            compute_session_name("/home/user/projects/my-project"),
+            "projects/my-project"
+        );
+        assert_eq!(
+            compute_session_name("/Users/simon/dev/deeply/nested/repo"),
+            "nested/repo"
+        );
+        assert_eq!(compute_session_name("/tmp/a/b"), "a/b");
+        assert_eq!(
+            compute_session_name("/Users/simon/dev/project.with"),
+            "dev/project.with"
+        );
+        assert_eq!(
+            compute_session_name("/Users/simon/dev/my-dashed-project"),
+            "dev/my-dashed-project"
+        );
+        assert_eq!(
+            compute_session_name("/Users/simon/dev/under_score_project"),
+            "dev/under_score_project"
+        );
     }
 }
