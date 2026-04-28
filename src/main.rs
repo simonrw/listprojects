@@ -6,6 +6,7 @@ use std::{
 
 use clap::Parser;
 use color_eyre::eyre::{self, Context, OptionExt};
+use dark_light::Mode;
 use ignore::{WalkBuilder, WalkState};
 use skim::prelude::*;
 
@@ -240,7 +241,7 @@ fn main() -> eyre::Result<()> {
         return Ok(());
     }
 
-    let system_colour_theme = dark_light::detect().wrap_err("detecting system colour theme")?;
+    let system_colour_theme = dark_light::detect().unwrap_or(Mode::Dark);
     let options = SkimOptions {
         color: match system_colour_theme {
             dark_light::Mode::Dark => Some("dark".to_string()),
