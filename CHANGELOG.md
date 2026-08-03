@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9](https://github.com/simonrw/listprojects/compare/v0.1.8...v0.1.9) - 2026-08-03
+
+### Added
+
+- support pure jj projects
+- format
+
+### Fixed
+
+- release config for version detecting
+- default to dark mode
+
+### Other
+
+- add more cases to compute_session_name tests
+- use release token for releases
+- release v0.1.8 ([#11](https://github.com/simonrw/listprojects/pull/11))
+
 ## [0.1.8](https://github.com/simonrw/listprojects/releases/tag/v0.1.8) - 2026-03-18
 
 ### Fixed
