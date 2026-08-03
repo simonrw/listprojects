@@ -205,13 +205,9 @@ fn main() -> eyre::Result<()> {
                             return WalkState::Skip;
                         }
 
-                        if !path.ends_with(".git") {
+                        if !path.ends_with(".git") && !path.ends_with(".jj") {
                             return WalkState::Continue;
                         }
-
-                        // if path.display().to_string().contains(".git") {
-                        //     return WalkState::Skip;
-                        // }
 
                         let path = path.parent().unwrap();
 
