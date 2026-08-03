@@ -1,2 +1,5 @@
 [workspace]
 publish = false
+# Crate isn't published to crates.io, so determine the last release
+# (and next version) from git tags rather than the cargo registry.
+git_only = true
