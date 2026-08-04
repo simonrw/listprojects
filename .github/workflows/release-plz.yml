@@ -62,6 +62,8 @@ jobs:
     name: Build ${{ matrix.target }}
     needs: release-plz-release
     if: needs.release-plz-release.outputs.releases_created == 'true'
+    permissions:
+      contents: write
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
