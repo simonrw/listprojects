@@ -39,6 +39,11 @@ fn compute_session_name(path: impl AsRef<Path>) -> String {
     let mut iter = path.components().rev();
     let file = iter.next().unwrap().as_os_str().to_string_lossy();
     let parent = iter.next().unwrap().as_os_str().to_string_lossy();
+    let file = if file.matches('.').count() > 1 {
+        file.replace('.', "-")
+    } else {
+        file.into_owned()
+    };
     format!("{}/{}", parent, file)
 }
 
@@ -316,6 +321,10 @@ mod tests {
         assert_eq!(
             compute_session_name("/Users/simon/dev/under_score_project"),
             "dev/under_score_project"
+        );
+        assert_eq!(
+            compute_session_name("/Users/simon/dev/project.with.dots"),
+            "dev/project-with-dots"
         );
     }
 }
