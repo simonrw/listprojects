@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11](https://github.com/simonrw/listprojects/compare/v0.1.10...v0.1.11) - 2026-08-10
+
+### Added
+
+- add Herdr workspace support ([#16](https://github.com/simonrw/listprojects/pull/16))
+
+### Other
+
+- init
+
 ## [0.1.10](https://github.com/simonrw/listprojects/compare/v0.1.9...v0.1.10) - 2026-08-04
 
 ### Added
