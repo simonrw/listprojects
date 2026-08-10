@@ -122,11 +122,11 @@ impl Cache {
     /// Add an item to the cache if not already present, and return true if the cache was updated
     pub fn add_to_cache(&mut self, value: impl Into<PathBuf>) -> bool {
         let path = value.into();
-        if self.items.contains_key(&path) {
-            false
-        } else {
-            self.items.insert(path, FrecencyEntry::new(0.1, None));
+        if let std::collections::hash_map::Entry::Vacant(entry) = self.items.entry(path) {
+            entry.insert(FrecencyEntry::new(0.1, None));
             true
+        } else {
+            false
         }
     }
 
