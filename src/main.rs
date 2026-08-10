@@ -1,4 +1,5 @@
 use std::{
+    ffi::OsString,
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -29,107 +30,223 @@ struct Args {
     #[clap(short, long)]
     list: bool,
 
-    /// Assume the project is given on the command line and just create/reuse a tmux session
+    /// Assume the project is given on the command line and activate it directly
     #[clap(short, long)]
     path: Option<String>,
 }
 
-fn compute_session_name(path: impl AsRef<Path>) -> String {
-    let path = path.as_ref();
-    let mut iter = path.components().rev();
-    let file = iter.next().unwrap().as_os_str().to_string_lossy();
-    let parent = iter.next().unwrap().as_os_str().to_string_lossy();
-    let file = if file.matches('.').count() > 1 {
-        file.replace('.', "-")
+fn activation_name(path: impl AsRef<Path>) -> eyre::Result<String> {
+    path.as_ref()
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            eyre::eyre!(
+                "project path has no usable final component: {}",
+                path.as_ref().display()
+            )
+        })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Backend {
+    Herdr,
+    Tmux,
+}
+
+fn select_backend(herdr_env: Option<&str>, _tmux_env: Option<&str>) -> Backend {
+    if herdr_env == Some("1") {
+        Backend::Herdr
     } else {
-        file.into_owned()
-    };
-    format!("{}/{}", parent, file)
+        Backend::Tmux
+    }
 }
 
 #[derive(Debug)]
-struct Tmux {
-    path: PathBuf,
-    session_name: String,
+struct CommandOutput {
+    success: bool,
+    stdout: Vec<u8>,
 }
 
-impl Tmux {
-    fn new(path: impl Into<PathBuf>) -> Self {
-        let path = path.into();
-        Self {
-            path: path.clone(),
-            session_name: compute_session_name(path),
-        }
-    }
+trait CommandRunner {
+    fn output(&self, program: &str, args: &[OsString]) -> eyre::Result<CommandOutput>;
+    fn exec(&self, program: &str, args: &[OsString]) -> eyre::Result<()>;
+}
 
-    fn activate(&self) -> std::io::Error {
-        if Self::in_tmux_session() {
-            if self.session_exists().unwrap() {
-                self.switch_session()
-            } else {
-                self.create_session().expect("creating session");
-                self.switch_session()
-            }
-        } else {
-            self.create_session().expect("creating session");
-            self.attach_session()
-        }
-    }
+struct SystemCommandRunner;
 
-    fn in_tmux_session() -> bool {
-        std::env::var("TMUX").is_ok()
-    }
-
-    fn session_exists(&self) -> eyre::Result<bool> {
-        let output = std::process::Command::new("tmux")
-            .arg("has-session")
-            .arg("-t")
-            .arg(&self.session_name)
+impl CommandRunner for SystemCommandRunner {
+    fn output(&self, program: &str, args: &[OsString]) -> eyre::Result<CommandOutput> {
+        let output = std::process::Command::new(program)
+            .args(args)
             .output()
-            .wrap_err("Checking if tmux session exists")?;
-
-        Ok(output.status.success())
+            .wrap_err_with(|| format!("running `{program}`"))?;
+        Ok(CommandOutput {
+            success: output.status.success(),
+            stdout: output.stdout,
+        })
     }
 
-    fn switch_session(&self) -> std::io::Error {
-        std::process::Command::new("tmux")
-            .args(["switch-client", "-t", &self.session_name])
-            .exec()
+    fn exec(&self, program: &str, args: &[OsString]) -> eyre::Result<()> {
+        let error = std::process::Command::new(program).args(args).exec();
+        Err(error).wrap_err_with(|| format!("replacing process with `{program}`"))
+    }
+}
+
+fn command_args<const N: usize>(args: [&str; N]) -> Vec<OsString> {
+    args.into_iter().map(OsString::from).collect()
+}
+
+fn activate_project<R: CommandRunner>(
+    path: &Path,
+    herdr_env: Option<&str>,
+    tmux_env: Option<&str>,
+    runner: &R,
+) -> eyre::Result<()> {
+    let name = activation_name(path)?;
+    match select_backend(herdr_env, tmux_env) {
+        Backend::Herdr => activate_herdr(path, &name, runner),
+        Backend::Tmux => activate_tmux(path, &name, tmux_env.is_some(), runner),
+    }
+}
+
+fn activate_herdr<R: CommandRunner>(path: &Path, name: &str, runner: &R) -> eyre::Result<()> {
+    let list_args = command_args(["workspace", "list"]);
+    let output = runner
+        .output("herdr", &list_args)
+        .wrap_err("listing Herdr workspaces")?;
+    eyre::ensure!(output.success, "`herdr workspace list` failed");
+
+    if let Some(workspace_id) = matching_herdr_workspace(&output.stdout, name)? {
+        let args = command_args(["workspace", "focus", workspace_id.as_str()]);
+        let output = runner
+            .output("herdr", &args)
+            .wrap_err_with(|| format!("focusing Herdr workspace `{workspace_id}`"))?;
+        eyre::ensure!(
+            output.success,
+            "`herdr workspace focus {workspace_id}` failed"
+        );
+    } else {
+        let args = vec![
+            "workspace".into(),
+            "create".into(),
+            "--cwd".into(),
+            path.as_os_str().to_owned(),
+            "--label".into(),
+            name.into(),
+            "--focus".into(),
+        ];
+        let output = runner
+            .output("herdr", &args)
+            .wrap_err_with(|| format!("creating Herdr workspace `{name}`"))?;
+        eyre::ensure!(
+            output.success,
+            "`herdr workspace create` failed for `{name}`"
+        );
     }
 
-    fn create_session(&self) -> eyre::Result<()> {
-        let status = std::process::Command::new("tmux")
-            .args([
-                "new-session",
-                "-d",
-                "-s",
-                &self.session_name,
-                "-c",
-                &self.path.display().to_string(),
-            ])
-            .status()
-            .wrap_err("creating new session")?;
+    Ok(())
+}
 
-        eyre::ensure!(status.success(), "creating new session failed");
-        Ok(())
+fn matching_herdr_workspace(json: &[u8], name: &str) -> eyre::Result<Option<String>> {
+    let response: serde_json::Value =
+        serde_json::from_slice(json).wrap_err("parsing `herdr workspace list` response as JSON")?;
+    let workspaces = response
+        .get("result")
+        .and_then(|result| result.get("workspaces"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or_eyre("`herdr workspace list` response is missing `result.workspaces`")?;
+
+    let mut matches = Vec::new();
+    for (index, workspace) in workspaces.iter().enumerate() {
+        let label = workspace
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| eyre::eyre!("workspace {index} is missing string field `label`"))?;
+        let number = workspace
+            .get("number")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or_else(|| eyre::eyre!("workspace {index} is missing unsigned field `number`"))?;
+        let workspace_id = workspace
+            .get("workspace_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| {
+                eyre::eyre!("workspace {index} is missing string field `workspace_id`")
+            })?;
+
+        if label == name {
+            matches.push((number, workspace_id.to_owned()));
+        }
     }
 
-    fn attach_session(&self) -> std::io::Error {
-        std::process::Command::new("tmux")
-            .args(["attach-session", "-t", &self.session_name])
-            .exec()
+    Ok(matches
+        .into_iter()
+        .min_by_key(|(number, _)| *number)
+        .map(|(_, workspace_id)| workspace_id))
+}
+
+fn activate_tmux<R: CommandRunner>(
+    path: &Path,
+    name: &str,
+    in_tmux: bool,
+    runner: &R,
+) -> eyre::Result<()> {
+    let has_args = command_args(["has-session", "-t", name]);
+    let session_exists = runner
+        .output("tmux", &has_args)
+        .wrap_err_with(|| format!("checking whether tmux session `{name}` exists"))?
+        .success;
+
+    if !session_exists {
+        let create_args = vec![
+            "new-session".into(),
+            "-d".into(),
+            "-s".into(),
+            name.into(),
+            "-c".into(),
+            path.as_os_str().to_owned(),
+        ];
+        let output = runner
+            .output("tmux", &create_args)
+            .wrap_err_with(|| format!("creating tmux session `{name}`"))?;
+        eyre::ensure!(output.success, "creating tmux session `{name}` failed");
     }
+
+    let action_args = if in_tmux {
+        command_args(["switch-client", "-t", name])
+    } else {
+        command_args(["attach-session", "-t", name])
+    };
+    runner.exec("tmux", &action_args).wrap_err_with(|| {
+        if in_tmux {
+            format!("switching to tmux session `{name}`")
+        } else {
+            format!("attaching to tmux session `{name}`")
+        }
+    })
 }
 
 fn expand_user(given: impl AsRef<str>) -> eyre::Result<PathBuf> {
     let given = given.as_ref();
-    if !given.contains("~") {
+    if !given.contains('~') {
         return Ok(PathBuf::from(given));
     }
 
     let home_dir = std::env::home_dir().ok_or_eyre("No home dir found")?;
-    let s = given.replace("~", &home_dir.display().to_string());
+    let s = given.replace('~', &home_dir.display().to_string());
     Ok(PathBuf::from(s))
+}
+
+fn activate_from_environment(path: &Path) -> eyre::Result<()> {
+    let herdr_env = std::env::var("HERDR_ENV").ok();
+    let tmux_env = std::env::var("TMUX").ok();
+    activate_project(
+        path,
+        herdr_env.as_deref(),
+        tmux_env.as_deref(),
+        &SystemCommandRunner,
+    )
 }
 
 fn main() -> eyre::Result<()> {
@@ -143,8 +260,6 @@ fn main() -> eyre::Result<()> {
         todo!()
     };
 
-    // shortcut - if the project path is specified on the command line then just switch to that
-    // project
     if let Some(path) = args.path {
         let full_path = expand_user(path)
             .context("failed to expand ~ for user directory")?
@@ -155,8 +270,7 @@ fn main() -> eyre::Result<()> {
             c.record_visit(&full_path);
             c.save().unwrap();
         }
-        let session = Tmux::new(full_path);
-        session.activate();
+        activate_from_environment(&full_path)?;
         return Ok(());
     }
 
@@ -200,7 +314,6 @@ fn main() -> eyre::Result<()> {
                             return WalkState::Continue;
                         }
 
-                        // skip common directories
                         if path.ends_with(".venv")
                             || path.ends_with("node_modules")
                             || path.ends_with("venv")
@@ -210,7 +323,10 @@ fn main() -> eyre::Result<()> {
                             return WalkState::Skip;
                         }
 
-                        if !path.ends_with(".git") && !path.ends_with(".jj") {
+                        if !path
+                            .file_name()
+                            .is_some_and(|name| name == ".git" || name == ".jj")
+                        {
                             return WalkState::Continue;
                         }
 
@@ -230,15 +346,12 @@ fn main() -> eyre::Result<()> {
     });
 
     if args.list {
-        // Non-interactive mode: print directories as they are discovered
         for item in rx {
             let path = (*item).as_any().downcast_ref::<SelectablePath>().unwrap();
             println!("{}", path.path.display());
         }
 
-        // Save cache before exiting
         cache.lock().unwrap().save().unwrap();
-
         return Ok(());
     }
 
@@ -253,7 +366,6 @@ fn main() -> eyre::Result<()> {
 
     let selected = Skim::run_with(&options, Some(rx)).ok_or_eyre("running fuzzy finder")?;
 
-    // explicitly save the cache
     cache.lock().unwrap().save().unwrap();
 
     if selected.is_abort {
@@ -276,9 +388,7 @@ fn main() -> eyre::Result<()> {
         c.save().unwrap();
     }
 
-    let session = Tmux::new(chosen_path);
-    session.activate();
-
+    activate_from_environment(chosen_path)?;
     Ok(())
 }
 
@@ -295,36 +405,307 @@ impl SkimItem for SelectablePath {
 
 #[cfg(test)]
 mod tests {
-    use super::compute_session_name;
+    use std::{collections::VecDeque, sync::Mutex};
+
+    use super::*;
+
+    const WORKSPACES: &str = r#"{
+        "result": {
+            "workspaces": [
+                {"number": 7, "workspace_id": "other", "label": "other-project"},
+                {"number": 9, "workspace_id": "later", "label": "project"},
+                {"number": 2, "workspace_id": "earlier", "label": "project"}
+            ]
+        }
+    }"#;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum Call {
+        Output(String, Vec<OsString>),
+        Exec(String, Vec<OsString>),
+    }
+
+    struct FakeRunner {
+        outputs: Mutex<VecDeque<CommandOutput>>,
+        calls: Mutex<Vec<Call>>,
+    }
+
+    impl FakeRunner {
+        fn new(outputs: impl IntoIterator<Item = CommandOutput>) -> Self {
+            Self {
+                outputs: Mutex::new(outputs.into_iter().collect()),
+                calls: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn success(stdout: impl Into<Vec<u8>>) -> CommandOutput {
+            CommandOutput {
+                success: true,
+                stdout: stdout.into(),
+            }
+        }
+
+        fn failure() -> CommandOutput {
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+            }
+        }
+
+        fn calls(&self) -> Vec<Call> {
+            std::mem::take(&mut *self.calls.lock().unwrap())
+        }
+    }
+
+    impl CommandRunner for FakeRunner {
+        fn output(&self, program: &str, args: &[OsString]) -> eyre::Result<CommandOutput> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Output(program.to_owned(), args.to_vec()));
+            self.outputs
+                .lock()
+                .unwrap()
+                .pop_front()
+                .ok_or_eyre("no fake output queued")
+        }
+
+        fn exec(&self, program: &str, args: &[OsString]) -> eyre::Result<()> {
+            self.calls
+                .lock()
+                .unwrap()
+                .push(Call::Exec(program.to_owned(), args.to_vec()));
+            Ok(())
+        }
+    }
 
     #[test]
-    fn test_compute_session_name() {
-        assert_eq!(compute_session_name("/Users/simon/dev/foo"), "dev/foo");
-        assert_eq!(compute_session_name("/Users/simon/work/bar"), "work/bar");
+    fn activation_names_are_exact_final_path_components() {
         assert_eq!(
-            compute_session_name("/home/user/projects/my-project"),
-            "projects/my-project"
+            activation_name("/Users/simon/work/localstack/localstack-pro").unwrap(),
+            "localstack-pro"
         );
         assert_eq!(
-            compute_session_name("/Users/simon/dev/deeply/nested/repo"),
-            "nested/repo"
-        );
-        assert_eq!(compute_session_name("/tmp/a/b"), "a/b");
-        assert_eq!(
-            compute_session_name("/Users/simon/dev/project.with"),
-            "dev/project.with"
+            activation_name("/tmp/project.with.dots").unwrap(),
+            "project.with.dots"
         );
         assert_eq!(
-            compute_session_name("/Users/simon/dev/my-dashed-project"),
-            "dev/my-dashed-project"
+            activation_name("/tmp/project with spaces").unwrap(),
+            "project with spaces"
         );
         assert_eq!(
-            compute_session_name("/Users/simon/dev/under_score_project"),
-            "dev/under_score_project"
+            activation_name("/one/shared").unwrap(),
+            activation_name("/two/shared").unwrap()
+        );
+        assert!(activation_name("/").is_err());
+        assert!(activation_name("").is_err());
+    }
+
+    #[test]
+    fn herdr_is_selected_only_for_exact_indicator_and_precedes_tmux() {
+        assert_eq!(select_backend(Some("1"), None), Backend::Herdr);
+        assert_eq!(select_backend(Some("1"), Some("tmux")), Backend::Herdr);
+        assert_eq!(select_backend(None, Some("tmux")), Backend::Tmux);
+        assert_eq!(select_backend(Some("0"), Some("tmux")), Backend::Tmux);
+        assert_eq!(select_backend(Some("true"), None), Backend::Tmux);
+    }
+
+    #[test]
+    fn workspace_matching_is_exact_and_uses_lowest_number() {
+        assert_eq!(
+            matching_herdr_workspace(WORKSPACES.as_bytes(), "project").unwrap(),
+            Some("earlier".into())
         );
         assert_eq!(
-            compute_session_name("/Users/simon/dev/project.with.dots"),
-            "dev/project-with-dots"
+            matching_herdr_workspace(WORKSPACES.as_bytes(), "proj").unwrap(),
+            None
         );
+        assert_eq!(
+            matching_herdr_workspace(WORKSPACES.as_bytes(), "PROJECT").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn malformed_workspace_responses_have_contextual_errors() {
+        assert!(
+            matching_herdr_workspace(b"not json", "project")
+                .unwrap_err()
+                .to_string()
+                .contains("parsing")
+        );
+        assert!(
+            matching_herdr_workspace(br#"{"result": {}}"#, "project")
+                .unwrap_err()
+                .to_string()
+                .contains("result.workspaces")
+        );
+        assert!(
+            matching_herdr_workspace(
+                br#"{"result":{"workspaces":[{"label":"project"}]}}"#,
+                "project"
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("number")
+        );
+    }
+
+    #[test]
+    fn matching_herdr_workspace_is_focused_without_creation() {
+        let runner = FakeRunner::new([FakeRunner::success(WORKSPACES), FakeRunner::success([])]);
+        activate_project(Path::new("/tmp/project"), Some("1"), Some("tmux"), &runner).unwrap();
+
+        assert_eq!(
+            runner.calls(),
+            vec![
+                Call::Output("herdr".into(), command_args(["workspace", "list"])),
+                Call::Output(
+                    "herdr".into(),
+                    command_args(["workspace", "focus", "earlier"])
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn missing_herdr_workspace_is_created_and_focused() {
+        let runner = FakeRunner::new([
+            FakeRunner::success(br#"{"result":{"workspaces":[]}}"#.as_slice()),
+            FakeRunner::success([]),
+        ]);
+        activate_project(Path::new("/tmp/my project"), Some("1"), None, &runner).unwrap();
+
+        assert_eq!(
+            runner.calls(),
+            vec![
+                Call::Output("herdr".into(), command_args(["workspace", "list"])),
+                Call::Output(
+                    "herdr".into(),
+                    vec![
+                        "workspace".into(),
+                        "create".into(),
+                        "--cwd".into(),
+                        "/tmp/my project".into(),
+                        "--label".into(),
+                        "my project".into(),
+                        "--focus".into(),
+                    ]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn herdr_failures_do_not_fall_back_to_tmux() {
+        let list_failure = FakeRunner::new([FakeRunner::failure()]);
+        assert!(
+            activate_project(
+                Path::new("/tmp/project"),
+                Some("1"),
+                Some("tmux"),
+                &list_failure
+            )
+            .is_err()
+        );
+        assert_eq!(list_failure.calls().len(), 1);
+
+        let malformed = FakeRunner::new([FakeRunner::success("not json")]);
+        assert!(
+            activate_project(
+                Path::new("/tmp/project"),
+                Some("1"),
+                Some("tmux"),
+                &malformed
+            )
+            .is_err()
+        );
+        assert_eq!(malformed.calls().len(), 1);
+
+        let focus_failure =
+            FakeRunner::new([FakeRunner::success(WORKSPACES), FakeRunner::failure()]);
+        assert!(
+            activate_project(
+                Path::new("/tmp/project"),
+                Some("1"),
+                Some("tmux"),
+                &focus_failure
+            )
+            .is_err()
+        );
+        assert!(focus_failure.calls().iter().all(|call| !matches!(call, Call::Output(program, _) | Call::Exec(program, _) if program == "tmux")));
+    }
+
+    #[test]
+    fn tmux_reuses_or_creates_then_switches_inside_tmux() {
+        let existing = FakeRunner::new([FakeRunner::success([])]);
+        activate_project(Path::new("/tmp/project"), None, Some("tmux"), &existing).unwrap();
+        assert_eq!(
+            existing.calls(),
+            vec![
+                Call::Output(
+                    "tmux".into(),
+                    command_args(["has-session", "-t", "project"])
+                ),
+                Call::Exec(
+                    "tmux".into(),
+                    command_args(["switch-client", "-t", "project"])
+                ),
+            ]
+        );
+
+        let missing = FakeRunner::new([FakeRunner::failure(), FakeRunner::success([])]);
+        activate_project(Path::new("/tmp/project"), None, Some("tmux"), &missing).unwrap();
+        assert_eq!(
+            missing.calls(),
+            vec![
+                Call::Output(
+                    "tmux".into(),
+                    command_args(["has-session", "-t", "project"])
+                ),
+                Call::Output(
+                    "tmux".into(),
+                    vec![
+                        "new-session".into(),
+                        "-d".into(),
+                        "-s".into(),
+                        "project".into(),
+                        "-c".into(),
+                        "/tmp/project".into()
+                    ]
+                ),
+                Call::Exec(
+                    "tmux".into(),
+                    command_args(["switch-client", "-t", "project"])
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn tmux_reuses_or_creates_then_attaches_outside_tmux() {
+        for (outputs, creates) in [
+            (vec![FakeRunner::success([])], false),
+            (vec![FakeRunner::failure(), FakeRunner::success([])], true),
+        ] {
+            let runner = FakeRunner::new(outputs);
+            activate_project(Path::new("/tmp/project.with.dots"), None, None, &runner).unwrap();
+            let calls = runner.calls();
+            assert_eq!(
+                calls.last(),
+                Some(&Call::Exec(
+                    "tmux".into(),
+                    command_args(["attach-session", "-t", "project.with.dots"])
+                ))
+            );
+            assert_eq!(calls.iter().any(|call| matches!(call, Call::Output(_, args) if args.first() == Some(&OsString::from("new-session")))), creates);
+        }
+    }
+
+    #[test]
+    fn tmux_command_failures_are_returned() {
+        let runner = FakeRunner::new([FakeRunner::failure(), FakeRunner::failure()]);
+        let error = activate_project(Path::new("/tmp/project"), None, None, &runner).unwrap_err();
+        assert!(error.to_string().contains("creating tmux session"));
     }
 }
