@@ -114,7 +114,7 @@ impl Cache {
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
         for (p, _) in sorted {
-            let item: Arc<dyn SkimItem> = Arc::new(SelectablePath { path: p.clone() });
+            let item: Arc<dyn SkimItem> = Arc::new(SelectablePath::new(p.clone()));
             let _ = tx.send(item);
         }
     }
