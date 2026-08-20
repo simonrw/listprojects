@@ -249,6 +249,51 @@ fn activate_from_environment(path: &Path) -> eyre::Result<()> {
     )
 }
 
+fn project_root_from_marker(path: &Path) -> Option<&Path> {
+    let is_project_marker = path.file_name().is_some_and(|name| {
+        (name == ".git" && (path.is_dir() || path.is_file())) || (name == ".jj" && path.is_dir())
+    });
+    if !is_project_marker {
+        return None;
+    }
+
+    path.parent()
+}
+
+fn worktree_repo_root(path: &Path) -> Option<PathBuf> {
+    let git_file = path.join(".git");
+    if !git_file.is_file() {
+        return None;
+    }
+
+    let git_file_contents = std::fs::read_to_string(git_file).ok()?;
+    let git_dir = PathBuf::from(git_file_contents.strip_prefix("gitdir:")?.trim());
+    let git_dir = if git_dir.is_absolute() {
+        git_dir
+    } else {
+        path.join(git_dir)
+    };
+
+    let common_dir = PathBuf::from(
+        std::fs::read_to_string(git_dir.join("commondir"))
+            .ok()?
+            .trim(),
+    );
+    let common_dir = if common_dir.is_absolute() {
+        common_dir
+    } else {
+        git_dir.join(common_dir)
+    }
+    .canonicalize()
+    .ok()?;
+
+    if common_dir.file_name().is_some_and(|name| name == ".git") {
+        common_dir.parent().map(Path::to_path_buf)
+    } else {
+        Some(common_dir)
+    }
+}
+
 fn main() -> eyre::Result<()> {
     color_eyre::install().wrap_err("Installing color-eyre handler")?;
     let args = Args::parse();
@@ -310,32 +355,24 @@ fn main() -> eyre::Result<()> {
                 move |entry| {
                     if let Ok(entry) = entry {
                         let path = entry.path();
-                        if !path.is_dir() {
-                            return WalkState::Continue;
-                        }
 
-                        if path.ends_with(".venv")
-                            || path.ends_with("node_modules")
-                            || path.ends_with("venv")
-                            || path.ends_with("__pycache__")
-                            || path.extension().is_some_and(|ext| ext == "jj")
+                        if path.is_dir()
+                            && (path.ends_with(".venv")
+                                || path.ends_with("node_modules")
+                                || path.ends_with("venv")
+                                || path.ends_with("__pycache__")
+                                || path.extension().is_some_and(|ext| ext == "jj"))
                         {
                             return WalkState::Skip;
                         }
 
-                        if !path
-                            .file_name()
-                            .is_some_and(|name| name == ".git" || name == ".jj")
-                        {
+                        let Some(path) = project_root_from_marker(path) else {
                             return WalkState::Continue;
-                        }
-
-                        let path = path.parent().unwrap();
+                        };
 
                         let pb = path.to_path_buf();
                         if cache.lock().unwrap().add_to_cache(pb.clone()) {
-                            let item: Arc<dyn SkimItem> =
-                                Arc::new(SelectablePath { path: pb.clone() });
+                            let item: Arc<dyn SkimItem> = Arc::new(SelectablePath::new(pb));
                             let _ = tx.send(item);
                         }
                     }
@@ -348,7 +385,7 @@ fn main() -> eyre::Result<()> {
     if args.list {
         for item in rx {
             let path = (*item).as_any().downcast_ref::<SelectablePath>().unwrap();
-            println!("{}", path.path.display());
+            println!("{}", path.display_text());
         }
 
         cache.lock().unwrap().save().unwrap();
@@ -395,11 +432,28 @@ fn main() -> eyre::Result<()> {
 #[derive(Debug)]
 struct SelectablePath {
     path: PathBuf,
+    repo_root: Option<PathBuf>,
+}
+
+impl SelectablePath {
+    fn new(path: PathBuf) -> Self {
+        let repo_root = worktree_repo_root(&path);
+        Self { path, repo_root }
+    }
+
+    fn display_text(&self) -> String {
+        match &self.repo_root {
+            Some(repo_root) => {
+                format!("{} (repo: {})", self.path.display(), repo_root.display())
+            }
+            None => self.path.display().to_string(),
+        }
+    }
 }
 
 impl SkimItem for SelectablePath {
     fn text(&self) -> Cow<'_, str> {
-        Cow::Owned(self.path.display().to_string())
+        Cow::Owned(self.display_text())
     }
 }
 
@@ -499,6 +553,56 @@ mod tests {
         );
         assert!(activation_name("/").is_err());
         assert!(activation_name("").is_err());
+    }
+
+    #[test]
+    fn git_worktree_marker_file_identifies_project_root() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "listprojects-worktree-marker-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&temp_root).unwrap();
+        let marker = temp_root.join(".git");
+        std::fs::write(&marker, "gitdir: /tmp/main/.git/worktrees/example\n").unwrap();
+
+        assert_eq!(project_root_from_marker(&marker), Some(temp_root.as_path()));
+
+        std::fs::remove_file(marker).unwrap();
+        std::fs::remove_dir(temp_root).unwrap();
+    }
+
+    #[test]
+    fn git_worktree_display_names_root_repository() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "listprojects-worktree-display-{}",
+            std::process::id()
+        ));
+        let repo_root = temp_root.join("repo");
+        let git_dir = repo_root.join(".git/worktrees/example");
+        let worktree_root = temp_root.join("worktree");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::create_dir_all(&worktree_root).unwrap();
+        let expected_repo_root = repo_root.canonicalize().unwrap();
+        std::fs::write(git_dir.join("commondir"), "../..\n").unwrap();
+        std::fs::write(
+            worktree_root.join(".git"),
+            format!("gitdir: {}\n", git_dir.display()),
+        )
+        .unwrap();
+
+        let item = SelectablePath::new(worktree_root.clone());
+
+        assert_eq!(item.repo_root, Some(expected_repo_root.clone()));
+        assert_eq!(
+            item.display_text(),
+            format!(
+                "{} (repo: {})",
+                worktree_root.display(),
+                expected_repo_root.display()
+            )
+        );
+
+        std::fs::remove_dir_all(temp_root).unwrap();
     }
 
     #[test]
