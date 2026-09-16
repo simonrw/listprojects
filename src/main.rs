@@ -1,5 +1,6 @@
 use std::{
     ffi::OsString,
+    hint::select_unpredictable,
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -55,7 +56,19 @@ enum Backend {
     Tmux,
 }
 
-fn select_backend(herdr_env: Option<&str>, _tmux_env: Option<&str>) -> Backend {
+fn select_backend(
+    session_backend_env: Option<&str>,
+    herdr_env: Option<&str>,
+    _tmux_env: Option<&str>,
+) -> Backend {
+    if let Some(session_backend_env) = session_backend_env {
+        if session_backend_env == "herdr" {
+            return Backend::Herdr;
+        } else if session_backend_env == "tmux" {
+            return Backend::Tmux;
+        }
+    }
+
     if herdr_env == Some("1") {
         Backend::Herdr
     } else {
@@ -100,12 +113,13 @@ fn command_args<const N: usize>(args: [&str; N]) -> Vec<OsString> {
 
 fn activate_project<R: CommandRunner>(
     path: &Path,
+    session_backend_env: Option<&str>,
     herdr_env: Option<&str>,
     tmux_env: Option<&str>,
     runner: &R,
 ) -> eyre::Result<()> {
     let name = activation_name(path)?;
-    match select_backend(herdr_env, tmux_env) {
+    match select_backend(session_backend_env, herdr_env, tmux_env) {
         Backend::Herdr => activate_herdr(path, &name, runner),
         Backend::Tmux => activate_tmux(path, &name, tmux_env.is_some(), runner),
     }
@@ -239,10 +253,12 @@ fn expand_user(given: impl AsRef<str>) -> eyre::Result<PathBuf> {
 }
 
 fn activate_from_environment(path: &Path) -> eyre::Result<()> {
+    let session_backend_env = std::env::var("SESSION_BACKEND").ok();
     let herdr_env = std::env::var("HERDR_ENV").ok();
     let tmux_env = std::env::var("TMUX").ok();
     activate_project(
         path,
+        session_backend_env.as_deref(),
         herdr_env.as_deref(),
         tmux_env.as_deref(),
         &SystemCommandRunner,
@@ -607,11 +623,20 @@ mod tests {
 
     #[test]
     fn herdr_is_selected_only_for_exact_indicator_and_precedes_tmux() {
-        assert_eq!(select_backend(Some("1"), None), Backend::Herdr);
-        assert_eq!(select_backend(Some("1"), Some("tmux")), Backend::Herdr);
-        assert_eq!(select_backend(None, Some("tmux")), Backend::Tmux);
-        assert_eq!(select_backend(Some("0"), Some("tmux")), Backend::Tmux);
-        assert_eq!(select_backend(Some("true"), None), Backend::Tmux);
+        assert_eq!(select_backend(Some("herdr"), None, None), Backend::Herdr);
+        assert_eq!(select_backend(Some("tmux"), None, None), Backend::Tmux);
+        assert_eq!(
+            select_backend(Some("tmux"), Some("herdr"), None),
+            Backend::Tmux
+        );
+        assert_eq!(select_backend(None, Some("1"), None), Backend::Herdr);
+        assert_eq!(
+            select_backend(None, Some("1"), Some("tmux")),
+            Backend::Herdr
+        );
+        assert_eq!(select_backend(None, None, Some("tmux")), Backend::Tmux);
+        assert_eq!(select_backend(None, Some("0"), Some("tmux")), Backend::Tmux);
+        assert_eq!(select_backend(None, Some("true"), None), Backend::Tmux);
     }
 
     #[test]
@@ -658,7 +683,14 @@ mod tests {
     #[test]
     fn matching_herdr_workspace_is_focused_without_creation() {
         let runner = FakeRunner::new([FakeRunner::success(WORKSPACES), FakeRunner::success([])]);
-        activate_project(Path::new("/tmp/project"), Some("1"), Some("tmux"), &runner).unwrap();
+        activate_project(
+            Path::new("/tmp/project"),
+            None,
+            Some("1"),
+            Some("tmux"),
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(
             runner.calls(),
@@ -678,7 +710,7 @@ mod tests {
             FakeRunner::success(br#"{"result":{"workspaces":[]}}"#.as_slice()),
             FakeRunner::success([]),
         ]);
-        activate_project(Path::new("/tmp/my project"), Some("1"), None, &runner).unwrap();
+        activate_project(Path::new("/tmp/my project"), None, Some("1"), None, &runner).unwrap();
 
         assert_eq!(
             runner.calls(),
@@ -706,6 +738,7 @@ mod tests {
         assert!(
             activate_project(
                 Path::new("/tmp/project"),
+                None,
                 Some("1"),
                 Some("tmux"),
                 &list_failure
@@ -718,6 +751,7 @@ mod tests {
         assert!(
             activate_project(
                 Path::new("/tmp/project"),
+                None,
                 Some("1"),
                 Some("tmux"),
                 &malformed
@@ -731,6 +765,7 @@ mod tests {
         assert!(
             activate_project(
                 Path::new("/tmp/project"),
+                None,
                 Some("1"),
                 Some("tmux"),
                 &focus_failure
@@ -743,7 +778,14 @@ mod tests {
     #[test]
     fn tmux_reuses_or_creates_then_switches_inside_tmux() {
         let existing = FakeRunner::new([FakeRunner::success([])]);
-        activate_project(Path::new("/tmp/project"), None, Some("tmux"), &existing).unwrap();
+        activate_project(
+            Path::new("/tmp/project"),
+            None,
+            None,
+            Some("tmux"),
+            &existing,
+        )
+        .unwrap();
         assert_eq!(
             existing.calls(),
             vec![
@@ -759,7 +801,14 @@ mod tests {
         );
 
         let missing = FakeRunner::new([FakeRunner::failure(), FakeRunner::success([])]);
-        activate_project(Path::new("/tmp/project"), None, Some("tmux"), &missing).unwrap();
+        activate_project(
+            Path::new("/tmp/project"),
+            None,
+            None,
+            Some("tmux"),
+            &missing,
+        )
+        .unwrap();
         assert_eq!(
             missing.calls(),
             vec![
@@ -793,7 +842,14 @@ mod tests {
             (vec![FakeRunner::failure(), FakeRunner::success([])], true),
         ] {
             let runner = FakeRunner::new(outputs);
-            activate_project(Path::new("/tmp/project.with.dots"), None, None, &runner).unwrap();
+            activate_project(
+                Path::new("/tmp/project.with.dots"),
+                None,
+                None,
+                None,
+                &runner,
+            )
+            .unwrap();
             let calls = runner.calls();
             assert_eq!(
                 calls.last(),
@@ -809,7 +865,8 @@ mod tests {
     #[test]
     fn tmux_command_failures_are_returned() {
         let runner = FakeRunner::new([FakeRunner::failure(), FakeRunner::failure()]);
-        let error = activate_project(Path::new("/tmp/project"), None, None, &runner).unwrap_err();
+        let error =
+            activate_project(Path::new("/tmp/project"), None, None, None, &runner).unwrap_err();
         assert!(error.to_string().contains("creating tmux session"));
     }
 }
