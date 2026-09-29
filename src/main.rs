@@ -1,13 +1,12 @@
 use std::{
     ffi::OsString,
-    hint::select_unpredictable,
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     sync::Mutex,
 };
 
 use clap::Parser;
-use color_eyre::eyre::{self, Context, OptionExt};
+use color_eyre::eyre::{self, Context, ContextCompat, OptionExt};
 use dark_light::Mode;
 use ignore::{WalkBuilder, WalkState};
 use skim::prelude::*;
@@ -37,6 +36,40 @@ struct Args {
 }
 
 fn activation_name(path: impl AsRef<Path>) -> eyre::Result<String> {
+    // Replicate session-backend specific naming schemes
+    let Ok(session_name) = std::env::var("SESSION_BACKEND") else {
+        return herdr_activation_name(path);
+    };
+
+    if session_name == "tmux" {
+        tmux_activation_name(path)
+    } else {
+        herdr_activation_name(path)
+    }
+}
+
+fn tmux_activation_name(path: impl AsRef<Path>) -> eyre::Result<String> {
+    let path = path.as_ref();
+    let mut iter = path.components().rev();
+    let file = iter
+        .next()
+        .context("not enough path components")?
+        .as_os_str()
+        .to_string_lossy();
+    let parent = iter
+        .next()
+        .context("not enough path components")?
+        .as_os_str()
+        .to_string_lossy();
+    let file = if file.matches('.').count() > 1 {
+        file.replace('.', "-")
+    } else {
+        file.into_owned()
+    };
+    Ok(format!("{}/{}", parent, file))
+}
+
+fn herdr_activation_name(path: impl AsRef<Path>) -> eyre::Result<String> {
     path.as_ref()
         .file_name()
         .and_then(|name| name.to_str())
