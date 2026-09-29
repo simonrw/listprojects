@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.14](https://github.com/simonrw/listprojects/compare/v0.1.13...v0.1.14) - 2026-09-29
+
+### Added
+
+- handle session backends  and their different names
+
 ## [0.1.13](https://github.com/simonrw/listprojects/compare/v0.1.12...v0.1.13) - 2026-09-16
 
 ### Added
