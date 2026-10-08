@@ -364,7 +364,7 @@ mod tests {
         let mut items = HashMap::new();
         items.insert(
             PathBuf::from("/home/user/dev/alpha"),
-            FrecencyEntry::new(3.14, Some(1_710_700_800)),
+            FrecencyEntry::new(3.25, Some(1_710_700_800)),
         );
         items.insert(
             PathBuf::from("/home/user/dev/beta"),
@@ -381,7 +381,7 @@ mod tests {
             .items
             .get(&PathBuf::from("/home/user/dev/alpha"))
             .unwrap();
-        assert!((alpha.score - 3.14).abs() < 0.001);
+        assert!((alpha.score - 3.25).abs() < 0.001);
         assert_eq!(alpha.last_accessed, Some(1_710_700_800));
 
         let beta = restored
