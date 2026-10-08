@@ -62,7 +62,7 @@ fn activation_name(path: impl AsRef<Path>, backend: Backend) -> eyre::Result<Str
         .unwrap_or(cleaned.as_os_str())
         .to_string_lossy()
         .into_owned();
-    if backend == Backend::Tmux
+    if matches!(backend, Backend::Tmux | Backend::Rex)
         && let Some(parent) = cleaned.parent().and_then(Path::file_name)
     {
         name = format!("{}/{name}", parent.to_string_lossy());
@@ -74,18 +74,25 @@ fn activation_name(path: impl AsRef<Path>, backend: Backend) -> eyre::Result<Str
 enum Backend {
     Herdr,
     Tmux,
+    Rex,
 }
 
 fn select_backend(
     session_backend_env: Option<&str>,
     herdr_env: Option<&str>,
-    _tmux_env: Option<&str>,
+    tmux_env: Option<&str>,
+    rex_env: Option<&str>,
 ) -> eyre::Result<Backend> {
     match session_backend_env {
         Some("herdr") => Ok(Backend::Herdr),
-        Some("tmux" | "rex") => Ok(Backend::Tmux),
+        Some("tmux") => Ok(Backend::Tmux),
+        Some("rex") => Ok(Backend::Rex),
         None | Some("") => Ok(if herdr_env == Some("1") {
             Backend::Herdr
+        } else if tmux_env.is_some_and(|value| !value.is_empty()) {
+            Backend::Tmux
+        } else if rex_env.is_some_and(|value| !value.is_empty()) {
+            Backend::Rex
         } else {
             Backend::Tmux
         }),
@@ -133,14 +140,81 @@ fn activate_project<R: CommandRunner>(
     session_backend_env: Option<&str>,
     herdr_env: Option<&str>,
     tmux_env: Option<&str>,
+    rex_env: Option<&str>,
     runner: &R,
 ) -> eyre::Result<()> {
-    let backend = select_backend(session_backend_env, herdr_env, tmux_env)?;
+    let backend = select_backend(session_backend_env, herdr_env, tmux_env, rex_env)?;
     let name = activation_name(path, backend)?;
     match backend {
         Backend::Herdr => activate_herdr(path, &name, runner),
         Backend::Tmux => activate_tmux(path, &name, tmux_env.is_some(), runner),
+        Backend::Rex => activate_rex(
+            path,
+            &name,
+            rex_env.is_some_and(|value| !value.is_empty()),
+            runner,
+        ),
     }
+}
+
+fn activate_rex<R: CommandRunner>(
+    path: &Path,
+    name: &str,
+    in_rex: bool,
+    runner: &R,
+) -> eyre::Result<()> {
+    let output = runner
+        .output("rex", &command_args(["ls", "--json"]))
+        .wrap_err("listing Rex sessions")?;
+    eyre::ensure!(output.success, "`rex ls --json` failed");
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .wrap_err("parsing `rex ls --json` response as JSON")?;
+    let sessions = response
+        .get("sessions")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_eyre("`rex ls --json` response is missing `sessions`")?;
+
+    let mut matching_session = None;
+    for session in sessions {
+        let label = session
+            .get("label")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_eyre("Rex session is missing string field `label`")?;
+        if label == name {
+            matching_session = Some(session);
+            break;
+        }
+    }
+
+    let session = if let Some(session) = matching_session {
+        session.clone()
+    } else {
+        let args = vec![
+            "new".into(),
+            name.into(),
+            "--cwd".into(),
+            path.as_os_str().to_owned(),
+            "--json".into(),
+        ];
+        let output = runner
+            .output("rex", &args)
+            .wrap_err_with(|| format!("creating Rex session `{name}`"))?;
+        eyre::ensure!(output.success, "creating Rex session `{name}` failed");
+        serde_json::from_slice(&output.stdout).wrap_err("parsing `rex new` response as JSON")?
+    };
+    let session_id = session
+        .get("session_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_eyre("Rex session is missing string field `session_id`")?;
+
+    let args = if in_rex {
+        command_args(["do", "session.select", &format!("session_id={session_id}")])
+    } else {
+        command_args(["attach", session_id])
+    };
+    runner
+        .exec("rex", &args)
+        .wrap_err_with(|| format!("activating Rex session `{session_id}`"))
 }
 
 fn activate_herdr<R: CommandRunner>(path: &Path, name: &str, runner: &R) -> eyre::Result<()> {
@@ -274,11 +348,13 @@ fn activate_from_environment(path: &Path) -> eyre::Result<()> {
     let session_backend_env = std::env::var("SESSION_BACKEND").ok();
     let herdr_env = std::env::var("HERDR_ENV").ok();
     let tmux_env = std::env::var("TMUX").ok();
+    let rex_env = std::env::var("REX_SESSION").ok();
     activate_project(
         path,
         session_backend_env.as_deref(),
         herdr_env.as_deref(),
         tmux_env.as_deref(),
+        rex_env.as_deref(),
         &SystemCommandRunner,
     )
 }
@@ -595,6 +671,7 @@ mod tests {
             ("/tmp/日本語", "tmp/日本語", "日本語"),
             ("/one/shared", "one/shared", "shared"),
             ("/two/shared", "two/shared", "shared"),
+            ("/home/simon/foo/bar/baz", "bar/baz", "baz"),
             ("/dotfiles", "dotfiles", "dotfiles"),
             ("/", "/", "/"),
             ("//", "/", "/"),
@@ -604,7 +681,7 @@ mod tests {
             ("/missing/repo/worktree/..", "missing/repo", "repo"),
         ] {
             for backend_env in [None, Some(""), Some("tmux"), Some("rex"), Some("herdr")] {
-                let backend = select_backend(backend_env, None, None).unwrap();
+                let backend = select_backend(backend_env, None, None, None).unwrap();
                 let expected = if backend_env == Some("herdr") {
                     herdr_name
                 } else {
@@ -622,7 +699,7 @@ mod tests {
     #[test]
     fn activation_names_resolve_relative_paths_against_cwd() {
         let cwd = std::env::current_dir().unwrap();
-        for backend in [Backend::Tmux, Backend::Herdr] {
+        for backend in [Backend::Tmux, Backend::Herdr, Backend::Rex] {
             for path in [
                 "",
                 ".",
@@ -697,10 +774,11 @@ mod tests {
                 for (backend_env, expected) in [
                     ("herdr", Backend::Herdr),
                     ("tmux", Backend::Tmux),
-                    ("rex", Backend::Tmux),
+                    ("rex", Backend::Rex),
                 ] {
                     assert_eq!(
-                        select_backend(Some(backend_env), herdr_env, tmux_env).unwrap(),
+                        select_backend(Some(backend_env), herdr_env, tmux_env, Some("current"))
+                            .unwrap(),
                         expected
                     );
                 }
@@ -709,19 +787,25 @@ mod tests {
     }
 
     #[test]
-    fn unset_or_empty_backend_preserves_herdr_detection() {
+    fn unset_or_empty_backend_detects_herdr_then_tmux_then_rex() {
         for backend_env in [None, Some("")] {
             for herdr_env in [None, Some("0"), Some("true"), Some("1")] {
-                for tmux_env in [None, Some("tmux")] {
-                    let expected = if herdr_env == Some("1") {
-                        Backend::Herdr
-                    } else {
-                        Backend::Tmux
-                    };
-                    assert_eq!(
-                        select_backend(backend_env, herdr_env, tmux_env).unwrap(),
-                        expected
-                    );
+                for tmux_env in [None, Some(""), Some("tmux")] {
+                    for rex_env in [None, Some(""), Some("current")] {
+                        let expected = if herdr_env == Some("1") {
+                            Backend::Herdr
+                        } else if tmux_env.is_some_and(|value| !value.is_empty()) {
+                            Backend::Tmux
+                        } else if rex_env.is_some_and(|value| !value.is_empty()) {
+                            Backend::Rex
+                        } else {
+                            Backend::Tmux
+                        };
+                        assert_eq!(
+                            select_backend(backend_env, herdr_env, tmux_env, rex_env).unwrap(),
+                            expected
+                        );
+                    }
                 }
             }
         }
@@ -735,6 +819,7 @@ mod tests {
             Some("unknown"),
             Some("1"),
             Some("tmux"),
+            Some("current"),
             &runner,
         )
         .unwrap_err();
@@ -791,6 +876,7 @@ mod tests {
             None,
             Some("1"),
             Some("tmux"),
+            None,
             &runner,
         )
         .unwrap();
@@ -813,7 +899,15 @@ mod tests {
             FakeRunner::success(br#"{"result":{"workspaces":[]}}"#.as_slice()),
             FakeRunner::success([]),
         ]);
-        activate_project(Path::new("/tmp/my project"), None, Some("1"), None, &runner).unwrap();
+        activate_project(
+            Path::new("/tmp/my project"),
+            None,
+            Some("1"),
+            None,
+            None,
+            &runner,
+        )
+        .unwrap();
 
         assert_eq!(
             runner.calls(),
@@ -844,6 +938,7 @@ mod tests {
                 None,
                 Some("1"),
                 Some("tmux"),
+                None,
                 &list_failure
             )
             .is_err()
@@ -857,6 +952,7 @@ mod tests {
                 None,
                 Some("1"),
                 Some("tmux"),
+                None,
                 &malformed
             )
             .is_err()
@@ -871,6 +967,7 @@ mod tests {
                 None,
                 Some("1"),
                 Some("tmux"),
+                None,
                 &focus_failure
             )
             .is_err()
@@ -880,7 +977,7 @@ mod tests {
 
     #[test]
     fn tmux_reuses_or_creates_then_switches_inside_tmux() {
-        for backend_env in [None, Some(""), Some("tmux"), Some("rex")] {
+        for backend_env in [None, Some(""), Some("tmux")] {
             for creates in [false, true] {
                 let outputs = if creates {
                     vec![FakeRunner::failure(), FakeRunner::success([])]
@@ -893,6 +990,7 @@ mod tests {
                     backend_env,
                     None,
                     Some("tmux"),
+                    None,
                     &runner,
                 )
                 .unwrap();
@@ -935,6 +1033,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 &runner,
             )
             .unwrap();
@@ -953,8 +1052,8 @@ mod tests {
     #[test]
     fn tmux_command_failures_are_returned() {
         let runner = FakeRunner::new([FakeRunner::failure(), FakeRunner::failure()]);
-        let error =
-            activate_project(Path::new("/tmp/project"), None, None, None, &runner).unwrap_err();
+        let error = activate_project(Path::new("/tmp/project"), None, None, None, None, &runner)
+            .unwrap_err();
         assert!(error.to_string().contains("creating tmux session"));
     }
 }
