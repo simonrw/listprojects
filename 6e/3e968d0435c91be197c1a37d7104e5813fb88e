@@ -1,0 +1,14 @@
+src/disk_cache.rs
+  h_65471a27093df2 367,384
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "6e3e968d0435c91be197c1a37d7104e5813fb88e",
+  "prompts": {},
+  "humans": {
+    "h_65471a27093df2": {
+      "author": "Simon Walker <59756+simonrw@users.noreply.github.com>"
+    }
+  }
+}
