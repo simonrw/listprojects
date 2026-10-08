@@ -1,0 +1,16 @@
+src/main.rs
+  h_65471a27093df2 65,77,83-84,88-89,92-95,143,146,151-156,160-219,351,357,674,684,702,777,780-781,790,793-808,822,879,902-910,941,955,970,980,993,1036,1055-1056
+tests/rex_activation.rs
+  h_65471a27093df2 1-178
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "ae0973fce25afeae649aac904b3475cbbedc6df9",
+  "prompts": {},
+  "humans": {
+    "h_65471a27093df2": {
+      "author": "Simon Walker <59756+simonrw@users.noreply.github.com>"
+    }
+  }
+}
